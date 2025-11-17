@@ -1,8 +1,33 @@
 import "./App.css";
 
 function App() {
+  const [text, setText] = useState("");
+  const [error, setError] = useState(null);
+  const [previewRows, setPreviewRows] = useState([]);
+  const [filename, setFilename] = useState("");
+
+  function passLineToPair(line) {
+    if (!line) return null;
+    const parts = line
+      .trim()
+      .split(/[\s,;]+/)
+      .filter(Boolean);
+    if (parts.length < 2) return null;
+    const x = Number.parts[0];
+    const y = Number.parts[1];
+    if (Number.isFinite(x) && Number.isFinite(y)) return [x, y];
+    return null;
+  }
+
+  function parseInputText(rawText) {
+    setError(null);
+    const lines = rawText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+  }
   return (
-    <div className="p-4 ml-96 mt-10  bg-gray-100 rounded shadow-md w-1/2">
+    <form className="p-4 ml-96 mt-10  bg-red-500 rounded shadow-md w-1/2">
       <h2 className="font-semibold mb-2">Enter Data (x,y per line)</h2>
       <textarea
         rows="8"
@@ -15,7 +40,7 @@ function App() {
           Analyze
         </button>
       </div>
-    </div>
+    </form>
   );
 }
 
