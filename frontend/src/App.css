@@ -1,3 +1,13 @@
-h1 {
+@font-face {
+    font-family: Neue;
+    src: url(./assets/fonts/NeueMachina-Regular.otf);
+}
+
+.Hero {
+    font-family: Neue;
+}
+
+h3 {
+    font-family: Neue;
     color: white;
 }

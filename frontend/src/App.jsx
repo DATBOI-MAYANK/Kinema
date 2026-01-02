@@ -1,19 +1,5 @@
 import React, { useState } from "react";
-
-/**
- * DataInputForm
- * Props:
- * - onDataSubmit(parsedData: number[][], meta?: object) => void
- * - allowHeader (boolean) : whether CSV can have header row (default true)
- *
- * Behavior:
- * - Accepts manual input in textarea (one x,y per line OR two columns separated by whitespace/tab/comma)
- * - Accepts CSV file upload (.csv)
- * - Basic validation: numeric x and y for each row
- * - Returns parsed array of pairs via onDataSubmit or shows errors
- *
- * Note: For very large CSVs or complex CSV edge cases, consider using PapaParse on the frontend.
- */
+import Papa from "papaparse";
 
 export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
   const [text, setText] = useState("");
@@ -37,42 +23,78 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
   }
 
   // Parse manual textarea input
-  function parseTextInput(rawText) {
-    setError(null);
-    const lines = rawText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
+  // function parseTextInput(rawText) {
+  //   setError(null);
+  //   const lines = rawText
+  //     .split(/\r?\n/)
+  //     .map((l) => l.trim())
+  //     .filter((l) => l.length > 0);
 
-    // optionally detect header row (non-numeric first token)
-    let startIndex = 0;
-    if (allowHeader && lines.length > 0) {
-      const firstTokens = lines[0].split(/[\s,;]+/).filter(Boolean);
-      const maybeX = Number(firstTokens[0]);
-      const maybeY = Number(firstTokens[1]);
-      if (!Number.isFinite(maybeX) || !Number.isFinite(maybeY)) {
-        startIndex = 1; // skip header
-      }
-    }
+  //   // optionally detect header row (non-numeric first token)
+  //   let startIndex = 0;
+  //   if (allowHeader && lines.length > 0) {
+  //     const firstTokens = lines[0].split(/[\s,;]+/).filter(Boolean);
+  //     const maybeX = Number(firstTokens[0]);
+  //     const maybeY = Number(firstTokens[1]);
+  //     if (!Number.isFinite(maybeX) || !Number.isFinite(maybeY)) {
+  //       startIndex = 1; // skip header
+  //     }
+  //   }
 
-    const parsed = [];
-    const badLines = [];
-    lines.forEach((line, idx) => {
-      if (idx < startIndex) return;
-      const pair = parseLineToPair(line);
-      if (pair) parsed.push(pair);
-      else badLines.push({ idx: idx + 1, text: line });
+  //   const parsed = [];
+  //   const badLines = [];
+  //   lines.forEach((line, idx) => {
+  //     if (idx < startIndex) return;
+  //     const pair = parseLineToPair(line);
+  //     if (pair) parsed.push(pair);
+  //     else badLines.push({ idx: idx + 1, text: line });
+  //   });
+
+  //   return { parsed, badLines };
+  // }
+
+  function parseTextInputWithValidation(text) {
+    const result = Papa.parse(text, {
+      skipEmptyLines: true,
+      dynamicTyping: true,
     });
 
-    return { parsed, badLines };
+    const validPairs = [];
+    const badLines = [];
+
+    result.data.forEach((row, index) => {
+      if (index === 0 && typeof row[0] === "string") return;
+
+      const x = row[0];
+      const y = row[1];
+
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        validPairs.push([x, y]);
+      } else {
+        badLines.push({
+          rowNumber: index + 1,
+          rowData: row,
+          reason: "Non-numeric or missing value",
+        });
+      }
+    });
+
+    return {
+      totalRows: result.data.length,
+      validRows: validPairs.length,
+      rejectedRows: badLines.length,
+      validPairs,
+      badLines,
+      parseErrors: result.errors, // PapaParse format errors
+    };
   }
 
   // Handle Analyze button (manual)
   function handleAnalyze(e) {
     e.preventDefault();
     setError(null);
-    const { parsed, badLines } = parseTextInput(text);
-    if (parsed.length === 0) {
+    const { pairs, badLines } = parseTextInput(text);
+    if (pairs.length === 0) {
       setError(
         "No valid numeric (x,y) pairs found. Please check the input format.",
       );
@@ -83,11 +105,12 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
       setError(
         `Some lines couldn't be parsed as numeric pairs. Example: line ${badLines[0].idx} -> "${badLines[0].text}".`,
       );
-      setPreviewRows(parsed.slice(0, 10));
+      setPreviewRows(pairs.slice(0, 10));
       return;
     }
-    setPreviewRows(parsed.slice(0, 10));
-    onDataSubmit(parsed, { source: "manual", rows: parsed.length });
+    console.log(pairs);
+    setPreviewRows(pairs.slice(0, 10));
+    onDataSubmit(pairs, { source: "manual", rows: pairs.length });
   }
 
   // Handle CSV file input
@@ -182,13 +205,13 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
   }
 
   return (
-    <section className="max-w-3xl mx-auto p-4 backdrop-blur-sm ">
-      <h3 className="text-lg font-semibold mb-2">Enter experimental data</h3>
+    <section className="Hero max-w-3xl mx-auto mt-4 p-4 backdrop-blur-sm ">
+      <h3 className="text-2xl font-semibold mb-2">Enter experimental data</h3>
 
       <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
         {/* Left: Manual input */}
         <div className="backdrop-blur-sm p-4 rounded shadow">
-          <label className="block text-sm font-medium mb-2">
+          <label className="block text-lg font-medium mb-2 text-white">
             Paste data (one x,y per line)
           </label>
           <textarea
@@ -197,7 +220,7 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
             onChange={(e) => setText(e.target.value)}
             placeholder={"Example:\n0,0\n1,2\n2,4\n3,6"}
             rows={10}
-            className="w-full border rounded p-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="bg-slate-900 text-slate-300 w-full border rounded p-2 resize-y  focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
 
           <div className="flex gap-2 mt-3">
@@ -249,8 +272,8 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
         </div>
 
         {/* Right: CSV upload & preview */}
-        <div className="bg-white p-4 rounded shadow">
-          <label className="block text-sm font-medium mb-2">
+        <div className="bg-slate-950 p-4 rounded shadow">
+          <label className="block text-sm text-slate-300 font-medium mb-2">
             Or upload CSV file
           </label>
           <input
@@ -258,20 +281,24 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
             type="file"
             accept=".csv,text/csv"
             onChange={handleFileChange}
-            className="block w-full text-sm text-gray-700 file:border file:rounded file:px-3 file:py-2 file:bg-gray-100 file:text-gray-700"
+            className="block w-full text-sm text-slate-400  file:border file:rounded file:px-3 file:py-2 file:bg-gray-100 file:text-gray-700"
           />
           {filename && (
-            <p className="mt-2 text-sm text-gray-600">Selected: {filename}</p>
+            <p className="mt-2 text-sm text-slate-300">Selected: {filename}</p>
           )}
 
           <div className="mt-4">
-            <h4 className="font-medium mb-2">Preview (first 10 rows)</h4>
+            <h4 className="font-medium text-slate-300 mb-2">
+              Preview (first 10 rows)
+            </h4>
             {previewRows.length === 0 ? (
-              <p className="text-sm text-gray-500">No preview available yet.</p>
+              <p className="text-sm text-slate-300">
+                No preview available yet.
+              </p>
             ) : (
               <div className="overflow-auto max-h-48 border rounded">
                 <table className="min-w-full text-left text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
+                  <thead className="bg-slate-600 sticky top-0">
                     <tr>
                       <th className="px-2 py-1">#</th>
                       <th className="px-2 py-1">x</th>
@@ -296,12 +323,12 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
         </div>
       </div>
 
-      <div className="mt-4 text-xs text-gray-500">
+      {/* <div className="mt-4 text-xs text-gray-500">
         <strong>Notes:</strong> The parser accepts comma, whitespace or
         semicolon separators. For complex CSVs (quoted fields, different
         separators, very large files) consider using a CSV library on the
         frontend (e.g., PapaParse) for robust parsing.
-      </div>
+      </div>*/}
     </section>
   );
 }
