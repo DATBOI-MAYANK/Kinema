@@ -6,6 +6,7 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
   const [error, setError] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
   const [filename, setFilename] = useState("");
+  const [analyzedData, setAnalyzedData] = useState(null);
 
   // Utility: parse a single line into [x, y] or returns null
   function parseLineToPair(line) {
@@ -21,37 +22,6 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
     if (Number.isFinite(x) && Number.isFinite(y)) return [x, y];
     return null;
   }
-
-  // Parse manual textarea input
-  // function parseTextInput(rawText) {
-  //   setError(null);
-  //   const lines = rawText
-  //     .split(/\r?\n/)
-  //     .map((l) => l.trim())
-  //     .filter((l) => l.length > 0);
-
-  //   // optionally detect header row (non-numeric first token)
-  //   let startIndex = 0;
-  //   if (allowHeader && lines.length > 0) {
-  //     const firstTokens = lines[0].split(/[\s,;]+/).filter(Boolean);
-  //     const maybeX = Number(firstTokens[0]);
-  //     const maybeY = Number(firstTokens[1]);
-  //     if (!Number.isFinite(maybeX) || !Number.isFinite(maybeY)) {
-  //       startIndex = 1; // skip header
-  //     }
-  //   }
-
-  //   const parsed = [];
-  //   const badLines = [];
-  //   lines.forEach((line, idx) => {
-  //     if (idx < startIndex) return;
-  //     const pair = parseLineToPair(line);
-  //     if (pair) parsed.push(pair);
-  //     else badLines.push({ idx: idx + 1, text: line });
-  //   });
-
-  //   return { parsed, badLines };
-  // }
 
   function parseTextInputWithValidation(text) {
     const result = Papa.parse(text, {
@@ -85,103 +55,102 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
       rejectedRows: badLines.length,
       validPairs,
       badLines,
-      parseErrors: result.errors, // PapaParse format errors
+      parseErrors: result.errors,
     };
   }
 
-  // Handle Analyze button (manual)
   function handleAnalyze(e) {
     e.preventDefault();
     setError(null);
-    const { pairs, badLines } = parseTextInput(text);
-    if (pairs.length === 0) {
-      setError(
-        "No valid numeric (x,y) pairs found. Please check the input format.",
-      );
-      setPreviewRows([]);
+    const { result } = parseTextInputWithValidation(text);
+
+    if (result.parseErrors && result.parseErrors.length > 0) {
+      setError("Input format error. Please check the data format.");
       return;
     }
-    if (badLines.length > 0) {
-      setError(
-        `Some lines couldn't be parsed as numeric pairs. Example: line ${badLines[0].idx} -> "${badLines[0].text}".`,
-      );
-      setPreviewRows(pairs.slice(0, 10));
+
+    if (!result.validPairs || result.validPairs.length < 2) {
+      setError("At least two valid data points are required for analysis.");
       return;
     }
-    console.log(pairs);
-    setPreviewRows(pairs.slice(0, 10));
-    onDataSubmit(pairs, { source: "manual", rows: pairs.length });
+
+    setAnalyzedData({
+      data: result.validPairs,
+      stats: {
+        total: result.totalRows,
+        valid: result.validRows,
+        rejected: result.rejectedRows,
+      },
+      badLines: result.badLines,
+    });
   }
 
-  // Handle CSV file input
-  function handleFileChange(ev) {
+  function handleFileChange(event) {
     setError(null);
-    setPreviewRows([]);
-    const file = ev.target.files && ev.target.files[0];
+
+    const file = event.target.files?.[0];
     if (!file) return;
-    setFilename(file.name);
 
-    // Read file as text
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target.result;
-      // Simple CSV parsing (handles common separators). For complex CSVs use PapaParse.
-      const lines = content
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
+    // Basic file check
+    if (!file.name.endsWith(".csv")) {
+      setError("Please upload a valid CSV file.");
+      return;
+    }
 
-      // detect header
-      let startIndex = 0;
-      if (allowHeader && lines.length > 0) {
-        const firstTokens = lines[0].split(/[\s,;]+/).filter(Boolean);
-        const maybeX = Number(firstTokens[0]);
-        const maybeY = Number(firstTokens[1]);
-        if (!Number.isFinite(maybeX) || !Number.isFinite(maybeY))
-          startIndex = 1;
-      }
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: true,
 
-      const parsed = [];
-      const badLines = [];
-      lines.forEach((line, idx) => {
-        if (idx < startIndex) return;
-        const pair = parseLineToPair(line.replace(/"/g, ""));
-        if (pair) parsed.push(pair);
-        else badLines.push({ idx: idx + 1, text: line });
-      });
+      complete: function (results) {
+        const validPairs = [];
+        const badLines = [];
 
-      if (parsed.length === 0) {
-        setError(
-          "CSV parsed no numeric rows. Ensure it has two numeric columns.",
-        );
-        return;
-      }
-      if (badLines.length > 0) {
-        setError(
-          `CSV parsed ${parsed.length} rows but ${badLines.length} rows failed. First bad line: ${badLines[0].idx}.`,
-        );
-        setPreviewRows(parsed.slice(0, 10));
-        // still allow submission if you want; here we stop until user fixes file
-        return;
-      }
+        results.data.forEach((row, index) => {
+          // Automatically takes first two columns
+          const values = Object.values(row);
+          const x = values[0];
+          const y = values[1];
 
-      setPreviewRows(parsed.slice(0, 10));
-      onDataSubmit(parsed, {
-        source: "csv",
-        filename: file.name,
-        rows: parsed.length,
-      });
-    };
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            validPairs.push([x, y]);
+          } else {
+            badLines.push({
+              rowNumber: index + 2, // +2 because header + 1-based index
+              rowData: row,
+              reason: "Invalid or non-numeric value",
+            });
+          }
+        });
 
-    reader.onerror = () => {
-      setError("Unable to read the file. Please try again.");
-      setFilename("");
-    };
+        // Handle CSV format errors
+        if (results.errors && results.errors.length > 0) {
+          setError("CSV format error. Please check the file structure.");
+          return;
+        }
 
-    reader.readAsText(file);
+        // Scientific minimum requirement
+        if (validPairs.length < 2) {
+          setError("At least two valid data points are required for analysis.");
+          return;
+        }
+
+        // Store analysis-ready data
+        setAnalyzedData({
+          data: validPairs,
+          stats: {
+            total: results.data.length,
+            valid: validPairs.length,
+            rejected: badLines.length,
+          },
+          badLines,
+          source: "csv",
+          fileName: file.name,
+        });
+      },
+    });
   }
 
-  // convenience: load sample dataset
   function loadSample(type = "linear") {
     if (type === "linear") {
       const sample = "0,0\n1,2\n2,4\n3,6\n4,8";
