@@ -48,7 +48,7 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
         });
       }
     });
-
+    console.log(result.errors);
     return {
       totalRows: result.data.length,
       validRows: validPairs.length,
