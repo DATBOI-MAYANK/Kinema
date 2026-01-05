@@ -9,19 +9,19 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
   const [analyzedData, setAnalyzedData] = useState(null);
 
   // Utility: parse a single line into [x, y] or returns null
-  function parseLineToPair(line) {
-    if (!line) return null;
-    // allow comma, tab, semicolon, or whitespace separators
-    const parts = line
-      .trim()
-      .split(/[\s,;]+/)
-      .filter(Boolean);
-    if (parts.length < 2) return null;
-    const x = Number(parts[0]);
-    const y = Number(parts[1]);
-    if (Number.isFinite(x) && Number.isFinite(y)) return [x, y];
-    return null;
-  }
+  // function parseLineToPair(line) {
+  //   if (!line) return null;
+  //   // allow comma, tab, semicolon, or whitespace separators
+  //   const parts = line
+  //     .trim()
+  //     .split(/[\s,;]+/)
+  //     .filter(Boolean);
+  //   if (parts.length < 2) return null;
+  //   const x = Number(parts[0]);
+  //   const y = Number(parts[1]);
+  //   if (Number.isFinite(x) && Number.isFinite(y)) return [x, y];
+  //   return null;
+  // }
 
   function parseTextInputWithValidation(text) {
     const result = Papa.parse(text, {
