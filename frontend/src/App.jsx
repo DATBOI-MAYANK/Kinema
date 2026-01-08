@@ -1,27 +1,30 @@
 import React, { useState } from "react";
 import Papa from "papaparse";
+import {
+  Upload,
+  Zap,
+  Trash2,
+  Database,
+  AlertCircle,
+  CheckCircle,
+  TrendingUp,
+  Activity,
+  Award,
+} from "lucide-react";
+import Chart from "chart.js/auto";
 
-export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
+export default function DataAnalysisApp() {
   const [text, setText] = useState("");
   const [error, setError] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
   const [filename, setFilename] = useState("");
   const [analyzedData, setAnalyzedData] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [regressionResults, setRegressionResults] = useState(null);
+  const [chartInstance, setChartInstance] = useState(null);
 
-  // Utility: parse a single line into [x, y] or returns null
-  // function parseLineToPair(line) {
-  //   if (!line) return null;
-  //   // allow comma, tab, semicolon, or whitespace separators
-  //   const parts = line
-  //     .trim()
-  //     .split(/[\s,;]+/)
-  //     .filter(Boolean);
-  //   if (parts.length < 2) return null;
-  //   const x = Number(parts[0]);
-  //   const y = Number(parts[1]);
-  //   if (Number.isFinite(x) && Number.isFinite(y)) return [x, y];
-  //   return null;
-  // }
+  // Backend API URL - adjust this to your backend URL
+  const API_URL = "http://localhost:3000/api/analyze";
 
   function parseTextInputWithValidation(text) {
     const result = Papa.parse(text, {
@@ -48,7 +51,7 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
         });
       }
     });
-    console.log(result.errors);
+
     return {
       totalRows: result.data.length,
       validRows: validPairs.length,
@@ -59,111 +62,337 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
     };
   }
 
-  function handleAnalyze(e) {
-    e.preventDefault();
-    setError(null);
-    const { result } = parseTextInputWithValidation(text);
+  async function sendToBackend(dataPoints) {
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ data: dataPoints }),
+      });
 
-    if (result.parseErrors && result.parseErrors.length > 0) {
-      setError("Input format error. Please check the data format.");
-      return;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to analyze data");
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (err) {
+      throw new Error(
+        err.message || "Network error. Please check if the backend is running.",
+      );
     }
-
-    if (!result.validPairs || result.validPairs.length < 2) {
-      setError("At least two valid data points are required for analysis.");
-      return;
-    }
-
-    setAnalyzedData({
-      data: result.validPairs,
-      stats: {
-        total: result.totalRows,
-        valid: result.validRows,
-        rejected: result.rejectedRows,
-      },
-      badLines: result.badLines,
-    });
   }
 
-  function handleFileChange(event) {
-    setError(null);
+  function evaluatePolynomial(coefficients, x) {
+    // For polynomial: y = a*x^n + b*x^(n-1) + ... + c
+    return coefficients.reduce((sum, coef, index) => {
+      return sum + coef * Math.pow(x, coefficients.length - 1 - index);
+    }, 0);
+  }
 
+  function evaluateExponential(coefficients, x) {
+    // For exponential: y = a * e^(b*x)
+    // coefficients = [a, b]
+    return coefficients[0] * Math.exp(coefficients[1] * x);
+  }
+
+  function evaluateLogarithmic(coefficients, x) {
+    // For logarithmic: y = a + b * ln(x)
+    // coefficients = [b, a]
+    if (x <= 0) return null;
+    return coefficients[1] + coefficients[0] * Math.log(x);
+  }
+
+  function createChart(data, results) {
+    const canvas = document.getElementById("regressionChart");
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+
+    // Destroy existing chart if it exists
+    if (chartInstance) {
+      chartInstance.destroy();
+    }
+
+    // Prepare data points
+    const dataPoints = data.map(([x, y]) => ({ x, y }));
+
+    // Get best model info
+    const bestModel = results.bestModel;
+    const xValues = data.map(([x]) => x);
+    const minX = Math.min(...xValues);
+    const maxX = Math.max(...xValues);
+    const step = (maxX - minX) / 100;
+
+    const regressionLinePoints = [];
+
+    for (let x = minX; x <= maxX; x += step) {
+      let y;
+
+      switch (bestModel.model) {
+        case "Linear":
+          // Linear: y = mx + b
+          y = evaluatePolynomial(bestModel.coefficients, x);
+          break;
+        case "Quadratic":
+          // Quadratic polynomial
+          y = evaluatePolynomial(bestModel.coefficients, x);
+          break;
+        case "Exponential":
+          // Exponential
+          y = evaluateExponential(bestModel.coefficients, x);
+          break;
+        case "Logarithmic":
+          // Logarithmic
+          y = evaluateLogarithmic(bestModel.coefficients, x);
+          if (y === null) continue;
+          break;
+        default:
+          y = 0;
+      }
+
+      regressionLinePoints.push({ x, y });
+    }
+
+    const newChart = new Chart(ctx, {
+      type: "scatter",
+      data: {
+        datasets: [
+          {
+            label: "Original Data",
+            data: dataPoints,
+            backgroundColor: "rgba(34, 211, 238, 0.8)",
+            borderColor: "rgba(34, 211, 238, 1)",
+            pointRadius: 6,
+            pointHoverRadius: 8,
+          },
+          {
+            label: `${bestModel.model} Regression (Best Fit)`,
+            data: regressionLinePoints,
+            type: "line",
+            borderColor: "rgba(168, 85, 247, 1)",
+            backgroundColor: "rgba(168, 85, 247, 0.1)",
+            borderWidth: 3,
+            pointRadius: 0,
+            fill: false,
+            tension: 0.4,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: {
+              color: "#cbd5e1",
+              font: { size: 14 },
+            },
+          },
+          title: {
+            display: true,
+            text: `${bestModel.model} Regression Analysis (R² = ${bestModel.r2.toFixed(4)})`,
+            color: "#22d3ee",
+            font: { size: 18, weight: "bold" },
+          },
+          tooltip: {
+            backgroundColor: "rgba(15, 23, 42, 0.9)",
+            titleColor: "#22d3ee",
+            bodyColor: "#cbd5e1",
+            borderColor: "rgba(34, 211, 238, 0.5)",
+            borderWidth: 1,
+          },
+        },
+        scales: {
+          x: {
+            title: {
+              display: true,
+              text: "X Values",
+              color: "#cbd5e1",
+              font: { size: 14 },
+            },
+            grid: {
+              color: "rgba(148, 163, 184, 0.1)",
+            },
+            ticks: {
+              color: "#94a3b8",
+            },
+          },
+          y: {
+            title: {
+              display: true,
+              text: "Y Values",
+              color: "#cbd5e1",
+              font: { size: 14 },
+            },
+            grid: {
+              color: "rgba(148, 163, 184, 0.1)",
+            },
+            ticks: {
+              color: "#94a3b8",
+            },
+          },
+        },
+      },
+    });
+
+    setChartInstance(newChart);
+  }
+
+  async function handleAnalyze(e) {
+    e.preventDefault();
+    setError(null);
+    setIsAnalyzing(true);
+    setRegressionResults(null);
+
+    try {
+      const result = parseTextInputWithValidation(text);
+
+      if (result.parseErrors && result.parseErrors.length > 0) {
+        setError("Input format error. Please check the data format.");
+        setIsAnalyzing(false);
+        return;
+      }
+
+      if (!result.validPairs || result.validPairs.length < 2) {
+        setError("At least two valid data points are required for analysis.");
+        setIsAnalyzing(false);
+        return;
+      }
+
+      setAnalyzedData({
+        data: result.validPairs,
+        stats: {
+          total: result.totalRows,
+          valid: result.validRows,
+          rejected: result.rejectedRows,
+        },
+        badLines: result.badLines,
+        source: "manual",
+      });
+
+      setPreviewRows(result.validPairs.slice(0, 10));
+
+      // Send to backend for regression analysis
+      const backendResults = await sendToBackend(result.validPairs);
+      setRegressionResults(backendResults);
+
+      // Create chart with results
+      setTimeout(() => {
+        createChart(result.validPairs, backendResults);
+      }, 100);
+
+      setIsAnalyzing(false);
+    } catch (err) {
+      setError(err.message);
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function handleFileChange(event) {
+    setError(null);
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Basic file check
     if (!file.name.endsWith(".csv")) {
       setError("Please upload a valid CSV file.");
       return;
     }
+
+    setFilename(file.name);
+    setIsAnalyzing(true);
 
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       dynamicTyping: true,
 
-      complete: function (results) {
-        const validPairs = [];
-        const badLines = [];
+      complete: async function (results) {
+        try {
+          const validPairs = [];
+          const badLines = [];
 
-        results.data.forEach((row, index) => {
-          // Automatically takes first two columns
-          const values = Object.values(row);
-          const x = values[0];
-          const y = values[1];
+          results.data.forEach((row, index) => {
+            const values = Object.values(row);
+            const x = values[0];
+            const y = values[1];
 
-          if (Number.isFinite(x) && Number.isFinite(y)) {
-            validPairs.push([x, y]);
-          } else {
-            badLines.push({
-              rowNumber: index + 2, // +2 because header + 1-based index
-              rowData: row,
-              reason: "Invalid or non-numeric value",
-            });
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+              validPairs.push([x, y]);
+            } else {
+              badLines.push({
+                rowNumber: index + 2,
+                rowData: row,
+                reason: "Invalid or non-numeric value",
+              });
+            }
+          });
+
+          if (results.errors && results.errors.length > 0) {
+            setError("CSV format error. Please check the file structure.");
+            setIsAnalyzing(false);
+            return;
           }
-        });
 
-        // Handle CSV format errors
-        if (results.errors && results.errors.length > 0) {
-          setError("CSV format error. Please check the file structure.");
-          return;
+          if (validPairs.length < 2) {
+            setError(
+              "At least two valid data points are required for analysis.",
+            );
+            setIsAnalyzing(false);
+            return;
+          }
+
+          setAnalyzedData({
+            data: validPairs,
+            stats: {
+              total: results.data.length,
+              valid: validPairs.length,
+              rejected: badLines.length,
+            },
+            badLines,
+            source: "csv",
+            fileName: file.name,
+          });
+
+          setPreviewRows(validPairs.slice(0, 10));
+
+          // Send to backend for regression analysis
+          const backendResults = await sendToBackend(validPairs);
+          setRegressionResults(backendResults);
+
+          // Create chart with results
+          setTimeout(() => {
+            createChart(validPairs, backendResults);
+          }, 100);
+
+          setIsAnalyzing(false);
+        } catch (err) {
+          setError(err.message);
+          setIsAnalyzing(false);
         }
-
-        // Scientific minimum requirement
-        if (validPairs.length < 2) {
-          setError("At least two valid data points are required for analysis.");
-          return;
-        }
-
-        // Store analysis-ready data
-        setAnalyzedData({
-          data: validPairs,
-          stats: {
-            total: results.data.length,
-            valid: validPairs.length,
-            rejected: badLines.length,
-          },
-          badLines,
-          source: "csv",
-          fileName: file.name,
-        });
       },
     });
   }
 
   function loadSample(type = "linear") {
-    if (type === "linear") {
-      const sample = "0,0\n1,2\n2,4\n3,6\n4,8";
-      setText(sample);
-    } else if (type === "quadratic") {
-      const sample = "0,0\n1,4.9\n2,19.6\n3,44.1";
-      setText(sample);
-    } else if (type === "exponential") {
-      const sample = "0,2\n1,3\n2,4.5\n3,6.75\n4,10.125";
-      setText(sample);
-    }
+    const samples = {
+      linear: "0,0\n1,2\n2,4\n3,6\n4,8",
+      quadratic: "0,0\n1,4.9\n2,19.6\n3,44.1\n4,78.4",
+      exponential: "0,2\n1,3\n2,4.5\n3,6.75\n4,10.125",
+    };
+
+    setText(samples[type] || samples.linear);
     setError(null);
     setPreviewRows([]);
+    setAnalyzedData(null);
+    setRegressionResults(null);
+    if (chartInstance) {
+      chartInstance.destroy();
+      setChartInstance(null);
+    }
   }
 
   function handleClear() {
@@ -171,133 +400,408 @@ export default function DataInputForm({ onDataSubmit, allowHeader = true }) {
     setError(null);
     setPreviewRows([]);
     setFilename("");
+    setAnalyzedData(null);
+    setRegressionResults(null);
+    if (chartInstance) {
+      chartInstance.destroy();
+      setChartInstance(null);
+    }
   }
 
   return (
-    <section className="Hero max-w-3xl mx-auto mt-4 p-4 backdrop-blur-sm ">
-      <h3 className="text-2xl font-semibold mb-2">Enter experimental data</h3>
-
-      <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-        {/* Left: Manual input */}
-        <div className="backdrop-blur-sm p-4 rounded shadow">
-          <label className="block text-lg font-medium mb-2 text-white">
-            Paste data (one x,y per line)
-          </label>
-          <textarea
-            aria-label="data-input"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={"Example:\n0,0\n1,2\n2,4\n3,6"}
-            rows={10}
-            className="bg-slate-900 text-slate-300 w-full border rounded p-2 resize-y  focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
-
-          <div className="flex gap-2 mt-3">
-            <button
-              type="button"
-              onClick={handleAnalyze}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-            >
-              Analyze
-            </button>
-
-            <button
-              type="button"
-              onClick={() => loadSample("linear")}
-              className="bg-gray-100 px-3 py-2 rounded border"
-            >
-              Load Linear Sample
-            </button>
-
-            <button
-              type="button"
-              onClick={() => loadSample("quadratic")}
-              className="bg-gray-100 px-3 py-2 rounded border"
-            >
-              Load Quadratic Sample
-            </button>
-
-            <button
-              type="button"
-              onClick={() => loadSample("exponential")}
-              className="bg-gray-100 px-3 py-2 rounded border"
-            >
-              Load Exponential Sample
-            </button>
-
-            <button
-              type="button"
-              onClick={handleClear}
-              className="ml-auto bg-red-100 px-3 py-2 rounded border text-red-700"
-            >
-              Clear
-            </button>
+    <div className="min-h-screen p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8 text-center">
+          <div className="flex items-center justify-center gap-3 mb-3">
+            <Database className="w-8 h-8 text-cyan-400" />
+            <h2 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+              Regression Analysis Portal
+            </h2>
           </div>
-
-          <p className="text-xs text-gray-500 mt-2">
-            You may paste CSV rows, or upload a CSV file on the right. Headers
-            are allowed and will be ignored.
+          <p className="text-slate-400 text-sm">
+            Upload or paste your experimental data for advanced regression
+            analysis
           </p>
         </div>
 
-        {/* Right: CSV upload & preview */}
-        <div className="bg-slate-950 p-4 rounded shadow">
-          <label className="block text-sm text-slate-300 font-medium mb-2">
-            Or upload CSV file
-          </label>
-          <input
-            aria-label="csv-upload"
-            type="file"
-            accept=".csv,text/csv"
-            onChange={handleFileChange}
-            className="block w-full text-sm text-slate-400  file:border file:rounded file:px-3 file:py-2 file:bg-gray-100 file:text-gray-700"
-          />
-          {filename && (
-            <p className="mt-2 text-sm text-slate-300">Selected: {filename}</p>
-          )}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          {/* Manual Input Section */}
+          <div className="relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-2xl opacity-20 group-hover:opacity-30 blur transition duration-300"></div>
+            <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
+              <label className="flex items-center gap-2 text-lg font-semibold mb-4 text-cyan-400">
+                <Zap className="w-5 h-5" />
+                Manual Input
+              </label>
 
-          <div className="mt-4">
-            <h4 className="font-medium text-slate-300 mb-2">
-              Preview (first 10 rows)
-            </h4>
-            {previewRows.length === 0 ? (
-              <p className="text-sm text-slate-300">
-                No preview available yet.
+              <textarea
+                aria-label="data-input"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="0,0&#10;1,2&#10;2,4&#10;3,6&#10;4,8"
+                rows={12}
+                className="w-full bg-slate-950/50 text-slate-200 border border-slate-700 rounded-xl p-4 resize-y focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm transition-all"
+              />
+
+              <div className="grid grid-cols-2 gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={handleAnalyze}
+                  disabled={isAnalyzing}
+                  className="col-span-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-cyan-600 hover:to-blue-700 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <TrendingUp className="w-4 h-4" />
+                      Analyze Data
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => loadSample("linear")}
+                  className="bg-slate-800 text-slate-300 px-3 py-2 rounded-lg text-sm hover:bg-slate-700 transition-all border border-slate-700"
+                >
+                  Linear
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => loadSample("quadratic")}
+                  className="bg-slate-800 text-slate-300 px-3 py-2 rounded-lg text-sm hover:bg-slate-700 transition-all border border-slate-700"
+                >
+                  Quadratic
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => loadSample("exponential")}
+                  className="bg-slate-800 text-slate-300 px-3 py-2 rounded-lg text-sm hover:bg-slate-700 transition-all border border-slate-700"
+                >
+                  Exponential
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="bg-red-500/10 text-red-400 px-3 py-2 rounded-lg text-sm hover:bg-red-500/20 transition-all border border-red-500/30 flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clear
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 mt-3">
+                Accepts CSV format with comma, tab, or space separators
               </p>
-            ) : (
-              <div className="overflow-auto max-h-48 border rounded">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-slate-600 sticky top-0">
+            </div>
+          </div>
+
+          {/* File Upload Section */}
+          <div className="relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl opacity-20 group-hover:opacity-30 blur transition duration-300"></div>
+            <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
+              <label className="flex items-center gap-2 text-lg font-semibold mb-4 text-purple-400">
+                <Upload className="w-5 h-5" />
+                File Upload
+              </label>
+
+              <div className="relative">
+                <input
+                  aria-label="csv-upload"
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={handleFileChange}
+                  className="hidden"
+                  id="file-upload"
+                />
+                <label
+                  htmlFor="file-upload"
+                  className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-600 rounded-xl hover:border-purple-500 transition-all cursor-pointer bg-slate-950/30 hover:bg-slate-950/50"
+                >
+                  <Upload className="w-10 h-10 text-slate-500 mb-2" />
+                  <span className="text-sm text-slate-400">
+                    Click to upload CSV
+                  </span>
+                  <span className="text-xs text-slate-600 mt-1">
+                    or drag and drop
+                  </span>
+                </label>
+              </div>
+
+              {filename && (
+                <div className="mt-4 p-3 bg-slate-950/50 rounded-lg border border-slate-700">
+                  <p className="text-sm text-slate-300 flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-green-400" />
+                    {filename}
+                  </p>
+                </div>
+              )}
+
+              {/* Preview Section */}
+              <div className="mt-6">
+                <h4 className="font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                  <Database className="w-4 h-4" />
+                  Data Preview
+                </h4>
+                {previewRows.length === 0 ? (
+                  <div className="text-center py-8 text-slate-500 text-sm">
+                    <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    No data to preview yet
+                  </div>
+                ) : (
+                  <div className="overflow-auto max-h-64 rounded-lg border border-slate-700">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-slate-800 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-2 text-slate-400 font-semibold">
+                            #
+                          </th>
+                          <th className="px-4 py-2 text-slate-400 font-semibold">
+                            X Value
+                          </th>
+                          <th className="px-4 py-2 text-slate-400 font-semibold">
+                            Y Value
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewRows.map((row, i) => (
+                          <tr
+                            key={i}
+                            className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors"
+                          >
+                            <td className="px-4 py-2 text-slate-500">
+                              {i + 1}
+                            </td>
+                            <td className="px-4 py-2 text-cyan-400 font-mono">
+                              {row[0]}
+                            </td>
+                            <td className="px-4 py-2 text-purple-400 font-mono">
+                              {row[1]}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Error/Success Messages */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-400 font-semibold">Error</p>
+              <p className="text-red-300 text-sm mt-1">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {analyzedData && !error && (
+          <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-green-400 font-semibold">
+                  Analysis Complete
+                </p>
+                <div className="mt-2 grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <span className="text-slate-400">Total Rows:</span>
+                    <span className="ml-2 text-slate-200 font-semibold">
+                      {analyzedData.stats.total}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Valid:</span>
+                    <span className="ml-2 text-green-400 font-semibold">
+                      {analyzedData.stats.valid}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Rejected:</span>
+                    <span className="ml-2 text-red-400 font-semibold">
+                      {analyzedData.stats.rejected}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Best Model Card */}
+        {regressionResults && (
+          <div className="mb-6 relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl opacity-20 blur transition duration-300"></div>
+            <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
+              <h3 className="flex items-center gap-2 text-xl font-semibold mb-4 text-green-400">
+                <Award className="w-5 h-5" />
+                Best Fit Model
+              </h3>
+              <div className="bg-slate-950/50 p-6 rounded-lg">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <p className="text-sm text-slate-400 mb-1">Model Type</p>
+                    <p className="text-2xl font-bold text-cyan-400">
+                      {regressionResults.bestModel.model}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-400 mb-1">Equation</p>
+                    <p className="text-lg font-mono text-purple-400 break-all">
+                      {regressionResults.bestModel.equation}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-400 mb-1">R² Score</p>
+                    <p className="text-2xl font-bold text-green-400">
+                      {regressionResults.bestModel.r2 === null ||
+                      isNaN(regressionResults.bestModel.r2)
+                        ? "N/A"
+                        : regressionResults.bestModel.r2.toFixed(6)}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {regressionResults.bestModel.r2 === 1
+                        ? "Perfect fit"
+                        : regressionResults.bestModel.r2 > 0.95
+                          ? "Excellent fit"
+                          : regressionResults.bestModel.r2 > 0.85
+                            ? "Good fit"
+                            : regressionResults.bestModel.r2 > 0.7
+                              ? "Moderate fit"
+                              : "Poor fit"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-400 mb-1">AIC Value</p>
+                    <p className="text-2xl font-bold text-yellow-400">
+                      {regressionResults.bestModel.aic === null ||
+                      regressionResults.bestModel.aic === Infinity ||
+                      regressionResults.bestModel.aic === -Infinity ||
+                      isNaN(regressionResults.bestModel.aic)
+                        ? "N/A"
+                        : regressionResults.bestModel.aic.toFixed(4)}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Lower is better
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* All Models Comparison */}
+        {regressionResults && regressionResults.allModels && (
+          <div className="mb-6 relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-2xl opacity-20 blur transition duration-300"></div>
+            <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
+              <h3 className="flex items-center gap-2 text-xl font-semibold mb-4 text-blue-400">
+                <Activity className="w-5 h-5" />
+                All Models Comparison
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-800">
                     <tr>
-                      <th className="px-2 py-1">#</th>
-                      <th className="px-2 py-1">x</th>
-                      <th className="px-2 py-1">y</th>
+                      <th className="px-4 py-3 text-slate-300 font-semibold">
+                        Model
+                      </th>
+                      <th className="px-4 py-3 text-slate-300 font-semibold">
+                        Equation
+                      </th>
+                      <th className="px-4 py-3 text-slate-300 font-semibold">
+                        R²
+                      </th>
+                      <th className="px-4 py-3 text-slate-300 font-semibold">
+                        AIC
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {previewRows.map((row, i) => (
-                      <tr key={i} className="odd:bg-white even:bg-gray-50">
-                        <td className="px-2 py-1 align-top">{i + 1}</td>
-                        <td className="px-2 py-1">{row[0]}</td>
-                        <td className="px-2 py-1">{row[1]}</td>
+                    {regressionResults.allModels.map((model, index) => (
+                      <tr
+                        key={index}
+                        className={`border-b border-slate-800 hover:bg-slate-800/30 transition-colors ${
+                          model.model === regressionResults.bestModel.model
+                            ? "bg-green-500/10"
+                            : model.r2 === null || isNaN(model.r2)
+                              ? "opacity-50"
+                              : ""
+                        }`}
+                      >
+                        <td className="px-4 py-3">
+                          <span className="text-cyan-400 font-semibold flex items-center gap-2">
+                            {model.model}
+                            {model.model ===
+                              regressionResults.bestModel.model && (
+                              <Award className="w-4 h-4 text-yellow-400" />
+                            )}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-slate-300 font-mono text-xs">
+                            {model.equation}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-green-400 font-mono">
+                            {model.r2 === null || isNaN(model.r2)
+                              ? "N/A"
+                              : model.r2.toFixed(6)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-yellow-400 font-mono">
+                            {model.aic === null ||
+                            model.aic === Infinity ||
+                            model.aic === -Infinity
+                              ? "N/A"
+                              : model.aic.toFixed(4)}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
+            </div>
           </div>
+        )}
 
-          {error && <p className="mt-3 text-sm text-red-600">Error: {error}</p>}
-        </div>
+        {/* Chart */}
+        {regressionResults && (
+          <div className="relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-2xl opacity-20 blur transition duration-300"></div>
+            <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
+              <h3 className="flex items-center gap-2 text-xl font-semibold mb-4 text-cyan-400">
+                <TrendingUp className="w-5 h-5" />
+                Visualization
+              </h3>
+              <div
+                className="bg-slate-950/50 p-4 rounded-xl"
+                style={{ height: "500px" }}
+              >
+                <canvas id="regressionChart"></canvas>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-
-      {/* <div className="mt-4 text-xs text-gray-500">
-        <strong>Notes:</strong> The parser accepts comma, whitespace or
-        semicolon separators. For complex CSVs (quoted fields, different
-        separators, very large files) consider using a CSV library on the
-        frontend (e.g., PapaParse) for robust parsing.
-      </div>*/}
-    </section>
+    </div>
   );
 }

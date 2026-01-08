@@ -5,7 +5,7 @@ const router = express.Router();
 
 router.post("/", (req, res) => {
   const { data } = req.body;
-
+  console.log(data);
   if (!Array.isArray(data) || data.length < 2) {
     return res.status(400).json({
       error: "At least two data points are required",
@@ -15,6 +15,7 @@ router.post("/", (req, res) => {
   try {
     const result = runRegressionAnalysis(data);
     res.json(result);
+    console.log("backend", result);
   } catch (err) {
     res.status(500).json({
       error: "Regression analysis failed",
