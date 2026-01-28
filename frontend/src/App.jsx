@@ -10,6 +10,8 @@ import {
   TrendingUp,
   Activity,
   Award,
+  Download,
+  Settings,
 } from "lucide-react";
 import Chart from "chart.js/auto";
 
@@ -22,8 +24,12 @@ export default function DataAnalysisApp() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [regressionResults, setRegressionResults] = useState(null);
   const [chartInstance, setChartInstance] = useState(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [polynomialDegree, setPolynomialDegree] = useState(3);
+  const [showConfidenceInterval, setShowConfidenceInterval] = useState(false);
+  const [showResiduals, setShowResiduals] = useState(false);
 
-  // Backend API URL - adjust this to your backend URL
+  // Backend API URL
   const API_URL = "http://localhost:3000/api/analyze";
 
   function parseTextInputWithValidation(text) {
@@ -69,7 +75,10 @@ export default function DataAnalysisApp() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ data: dataPoints }),
+        body: JSON.stringify({
+          data: dataPoints,
+          polynomialDegree: polynomialDegree,
+        }),
       });
 
       if (!response.ok) {
@@ -87,23 +96,140 @@ export default function DataAnalysisApp() {
   }
 
   function evaluatePolynomial(coefficients, x) {
-    // For polynomial: y = a*x^n + b*x^(n-1) + ... + c
     return coefficients.reduce((sum, coef, index) => {
       return sum + coef * Math.pow(x, coefficients.length - 1 - index);
     }, 0);
   }
 
   function evaluateExponential(coefficients, x) {
-    // For exponential: y = a * e^(b*x)
-    // coefficients = [a, b]
-    return coefficients[0] * Math.exp(coefficients[1] * x);
+    if (!coefficients || coefficients.length < 2) return 0;
+    const a = coefficients[0];
+    const b = coefficients[1];
+    if (isNaN(a) || isNaN(b)) return 0;
+    return a * Math.exp(b * x);
   }
 
   function evaluateLogarithmic(coefficients, x) {
-    // For logarithmic: y = a + b * ln(x)
-    // coefficients = [b, a]
+    if (!coefficients || coefficients.length < 2) return null;
     if (x <= 0) return null;
-    return coefficients[1] + coefficients[0] * Math.log(x);
+    const b = coefficients[0];
+    const a = coefficients[1];
+    if (isNaN(a) || isNaN(b)) return null;
+    return a + b * Math.log(x);
+  }
+
+  function evaluatePower(coefficients, x) {
+    // Power: y = a * x^b
+    if (!coefficients || coefficients.length < 2) return null;
+    if (x <= 0) return null;
+    const a = coefficients[0];
+    const b = coefficients[1];
+    if (isNaN(a) || isNaN(b)) return null;
+    return a * Math.pow(x, b);
+  }
+
+  function calculateResiduals(data, bestModel) {
+    return data.map(([x, y]) => {
+      let predicted;
+      switch (bestModel.model) {
+        case "Linear":
+        case "Quadratic":
+        case "Cubic":
+        case "Quartic":
+          predicted = evaluatePolynomial(bestModel.coefficients, x);
+          break;
+        case "Exponential":
+          predicted = evaluateExponential(bestModel.coefficients, x);
+          break;
+        case "Logarithmic":
+          predicted = evaluateLogarithmic(bestModel.coefficients, x);
+          break;
+        case "Power":
+          predicted = evaluatePower(bestModel.coefficients, x);
+          break;
+        default:
+          predicted = 0;
+      }
+      return { x, residual: y - predicted };
+    });
+  }
+
+  function exportChart(format = "png") {
+    if (!chartInstance) return;
+
+    const canvas = document.getElementById("regressionChart");
+    if (!canvas) return;
+
+    if (format === "png" || format === "jpg") {
+      const url = canvas.toDataURL(`image/${format}`, 1.0);
+      const link = document.createElement("a");
+      link.download = `regression-analysis.${format}`;
+      link.href = url;
+      link.click();
+    } else if (format === "svg") {
+      // For SVG, we'll export the data as CSV instead since Chart.js uses canvas
+      exportData("csv");
+    }
+  }
+
+  function exportData(format = "csv") {
+    if (!analyzedData || !regressionResults) return;
+
+    const data = analyzedData.data;
+    const bestModel = regressionResults.bestModel;
+
+    if (format === "csv") {
+      let csv = "X,Y,Predicted,Residual\n";
+      data.forEach(([x, y]) => {
+        let predicted;
+        switch (bestModel.model) {
+          case "Linear":
+          case "Quadratic":
+          case "Cubic":
+          case "Quartic":
+            predicted = evaluatePolynomial(bestModel.coefficients, x);
+            break;
+          case "Exponential":
+            predicted = evaluateExponential(bestModel.coefficients, x);
+            break;
+          case "Logarithmic":
+            predicted = evaluateLogarithmic(bestModel.coefficients, x);
+            break;
+          case "Power":
+            predicted = evaluatePower(bestModel.coefficients, x);
+            break;
+          default:
+            predicted = 0;
+        }
+        const residual = y - predicted;
+        csv += `${x},${y},${predicted},${residual}\n`;
+      });
+
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.download = "regression-data.csv";
+      link.href = url;
+      link.click();
+      URL.revokeObjectURL(url);
+    } else if (format === "json") {
+      const exportObj = {
+        originalData: data,
+        bestModel: bestModel,
+        allModels: regressionResults.allModels,
+        statistics: analyzedData.stats,
+      };
+
+      const blob = new Blob([JSON.stringify(exportObj, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.download = "regression-analysis.json";
+      link.href = url;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
   }
 
   function createChart(data, results) {
@@ -112,20 +238,16 @@ export default function DataAnalysisApp() {
 
     const ctx = canvas.getContext("2d");
 
-    // Destroy existing chart if it exists
     if (chartInstance) {
       chartInstance.destroy();
     }
 
-    // Prepare data points
     const dataPoints = data.map(([x, y]) => ({ x, y }));
-
-    // Get best model info
     const bestModel = results.bestModel;
     const xValues = data.map(([x]) => x);
     const minX = Math.min(...xValues);
     const maxX = Math.max(...xValues);
-    const step = (maxX - minX) / 100;
+    const step = (maxX - minX) / 200;
 
     const regressionLinePoints = [];
 
@@ -134,20 +256,20 @@ export default function DataAnalysisApp() {
 
       switch (bestModel.model) {
         case "Linear":
-          // Linear: y = mx + b
-          y = evaluatePolynomial(bestModel.coefficients, x);
-          break;
         case "Quadratic":
-          // Quadratic polynomial
+        case "Cubic":
+        case "Quartic":
           y = evaluatePolynomial(bestModel.coefficients, x);
           break;
         case "Exponential":
-          // Exponential
           y = evaluateExponential(bestModel.coefficients, x);
           break;
         case "Logarithmic":
-          // Logarithmic
           y = evaluateLogarithmic(bestModel.coefficients, x);
+          if (y === null) continue;
+          break;
+        case "Power":
+          y = evaluatePower(bestModel.coefficients, x);
           if (y === null) continue;
           break;
         default:
@@ -157,31 +279,70 @@ export default function DataAnalysisApp() {
       regressionLinePoints.push({ x, y });
     }
 
+    const datasets = [
+      {
+        label: "Original Data",
+        data: dataPoints,
+        backgroundColor: "rgba(34, 211, 238, 0.8)",
+        borderColor: "rgba(34, 211, 238, 1)",
+        pointRadius: 6,
+        pointHoverRadius: 8,
+      },
+      {
+        label: `${bestModel.model} Regression (Best Fit)`,
+        data: regressionLinePoints,
+        type: "line",
+        borderColor: "rgba(168, 85, 247, 1)",
+        backgroundColor: "rgba(168, 85, 247, 0.1)",
+        borderWidth: 3,
+        pointRadius: 0,
+        fill: false,
+        tension: 0.4,
+      },
+    ];
+
+    // Add confidence interval if enabled
+    if (showConfidenceInterval && bestModel.r2 > 0.5) {
+      const stdError = Math.sqrt((1 - bestModel.r2) / data.length) * 2;
+      const upperBound = regressionLinePoints.map((p) => ({
+        x: p.x,
+        y: p.y + stdError,
+      }));
+      const lowerBound = regressionLinePoints.map((p) => ({
+        x: p.x,
+        y: p.y - stdError,
+      }));
+
+      datasets.push({
+        label: "95% Confidence Interval",
+        data: [...upperBound, ...lowerBound.reverse()],
+        type: "line",
+        borderColor: "rgba(168, 85, 247, 0.3)",
+        backgroundColor: "rgba(168, 85, 247, 0.1)",
+        borderWidth: 1,
+        pointRadius: 0,
+        fill: true,
+        tension: 0.4,
+      });
+    }
+
+    // Add residuals if enabled
+    if (showResiduals) {
+      const residuals = calculateResiduals(data, bestModel);
+      datasets.push({
+        label: "Residuals",
+        data: residuals.map((r) => ({ x: r.x, y: r.residual })),
+        type: "scatter",
+        backgroundColor: "rgba(239, 68, 68, 0.6)",
+        borderColor: "rgba(239, 68, 68, 1)",
+        pointRadius: 4,
+        pointStyle: "cross",
+      });
+    }
+
     const newChart = new Chart(ctx, {
       type: "scatter",
-      data: {
-        datasets: [
-          {
-            label: "Original Data",
-            data: dataPoints,
-            backgroundColor: "rgba(34, 211, 238, 0.8)",
-            borderColor: "rgba(34, 211, 238, 1)",
-            pointRadius: 6,
-            pointHoverRadius: 8,
-          },
-          {
-            label: `${bestModel.model} Regression (Best Fit)`,
-            data: regressionLinePoints,
-            type: "line",
-            borderColor: "rgba(168, 85, 247, 1)",
-            backgroundColor: "rgba(168, 85, 247, 0.1)",
-            borderWidth: 3,
-            pointRadius: 0,
-            fill: false,
-            tension: 0.4,
-          },
-        ],
-      },
+      data: { datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -276,11 +437,9 @@ export default function DataAnalysisApp() {
 
       setPreviewRows(result.validPairs.slice(0, 10));
 
-      // Send to backend for regression analysis
       const backendResults = await sendToBackend(result.validPairs);
       setRegressionResults(backendResults);
 
-      // Create chart with results
       setTimeout(() => {
         createChart(result.validPairs, backendResults);
       }, 100);
@@ -359,11 +518,9 @@ export default function DataAnalysisApp() {
 
           setPreviewRows(validPairs.slice(0, 10));
 
-          // Send to backend for regression analysis
           const backendResults = await sendToBackend(validPairs);
           setRegressionResults(backendResults);
 
-          // Create chart with results
           setTimeout(() => {
             createChart(validPairs, backendResults);
           }, 100);
@@ -382,6 +539,10 @@ export default function DataAnalysisApp() {
       linear: "0,0\n1,2\n2,4\n3,6\n4,8",
       quadratic: "0,0\n1,4.9\n2,19.6\n3,44.1\n4,78.4",
       exponential: "0,2\n1,3\n2,4.5\n3,6.75\n4,10.125",
+      logarithmic: "1,0\n2,0.693\n3,1.099\n4,1.386\n5,1.609",
+      power: "1,1\n2,4\n3,9\n4,16\n5,25",
+      cubic: "0,0\n1,1\n2,8\n3,27\n4,64\n5,125",
+      sine: "0,0\n0.785,0.707\n1.571,1\n2.356,0.707\n3.142,0\n3.927,-0.707\n4.712,-1\n5.498,-0.707\n6.283,0",
     };
 
     setText(samples[type] || samples.linear);
@@ -408,6 +569,12 @@ export default function DataAnalysisApp() {
     }
   }
 
+  function updateChart() {
+    if (analyzedData && regressionResults) {
+      createChart(analyzedData.data, regressionResults);
+    }
+  }
+
   return (
     <div className="min-h-screen p-6">
       <div className="max-w-7xl mx-auto">
@@ -416,11 +583,11 @@ export default function DataAnalysisApp() {
           <div className="flex items-center justify-center gap-3 mb-3">
             <Database className="w-8 h-8 text-cyan-400" />
             <h2 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
-              Regression Analysis Portal
+              Advanced Regression Analysis Portal
             </h2>
           </div>
           <p className="text-slate-400 text-sm">
-            Upload or paste your experimental data for advanced regression
+            Upload or paste your experimental data for comprehensive regression
             analysis
           </p>
         </div>
@@ -467,7 +634,7 @@ export default function DataAnalysisApp() {
                 <button
                   type="button"
                   onClick={() => loadSample("linear")}
-                  className="bg-slate-800 text-slate-300 px-3 py-2 rounded-lg text-sm hover:bg-slate-700 transition-all border border-slate-700"
+                  className="bg-slate-800 text-slate-300 px-2 py-2 rounded-lg text-xs hover:bg-slate-700 transition-all border border-slate-700"
                 >
                   Linear
                 </button>
@@ -475,7 +642,7 @@ export default function DataAnalysisApp() {
                 <button
                   type="button"
                   onClick={() => loadSample("quadratic")}
-                  className="bg-slate-800 text-slate-300 px-3 py-2 rounded-lg text-sm hover:bg-slate-700 transition-all border border-slate-700"
+                  className="bg-slate-800 text-slate-300 px-2 py-2 rounded-lg text-xs hover:bg-slate-700 transition-all border border-slate-700"
                 >
                   Quadratic
                 </button>
@@ -483,18 +650,42 @@ export default function DataAnalysisApp() {
                 <button
                   type="button"
                   onClick={() => loadSample("exponential")}
-                  className="bg-slate-800 text-slate-300 px-3 py-2 rounded-lg text-sm hover:bg-slate-700 transition-all border border-slate-700"
+                  className="bg-slate-800 text-slate-300 px-2 py-2 rounded-lg text-xs hover:bg-slate-700 transition-all border border-slate-700"
                 >
                   Exponential
                 </button>
 
                 <button
                   type="button"
+                  onClick={() => loadSample("cubic")}
+                  className="bg-slate-800 text-slate-300 px-2 py-2 rounded-lg text-xs hover:bg-slate-700 transition-all border border-slate-700"
+                >
+                  Cubic
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => loadSample("logarithmic")}
+                  className="bg-slate-800 text-slate-300 px-2 py-2 rounded-lg text-xs hover:bg-slate-700 transition-all border border-slate-700"
+                >
+                  Logarithmic
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => loadSample("power")}
+                  className="bg-slate-800 text-slate-300 px-2 py-2 rounded-lg text-xs hover:bg-slate-700 transition-all border border-slate-700"
+                >
+                  Power
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleClear}
-                  className="bg-red-500/10 text-red-400 px-3 py-2 rounded-lg text-sm hover:bg-red-500/20 transition-all border border-red-500/30 flex items-center justify-center gap-2"
+                  className="col-span-2 bg-red-500/10 text-red-400 px-3 py-2 rounded-lg text-sm hover:bg-red-500/20 transition-all border border-red-500/30 flex items-center justify-center gap-2"
                 >
                   <Trash2 className="w-4 h-4" />
-                  Clear
+                  Clear All
                 </button>
               </div>
 
@@ -598,6 +789,84 @@ export default function DataAnalysisApp() {
           </div>
         </div>
 
+        {/* Advanced Settings */}
+        {regressionResults && (
+          <div className="mb-6 relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-orange-500 to-amber-500 rounded-2xl opacity-20 blur transition duration-300"></div>
+            <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
+              <button
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex items-center gap-2 text-lg font-semibold mb-4 text-orange-400 hover:text-orange-300 transition-colors"
+              >
+                <Settings className="w-5 h-5" />
+                Advanced Options
+                <span className="text-sm text-slate-500">
+                  {showAdvanced ? "▼" : "▶"}
+                </span>
+              </button>
+
+              {showAdvanced && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-950/50 p-4 rounded-lg">
+                    <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
+                      <input
+                        type="checkbox"
+                        checked={showConfidenceInterval}
+                        onChange={(e) => {
+                          setShowConfidenceInterval(e.target.checked);
+                          setTimeout(updateChart, 50);
+                        }}
+                        className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500"
+                      />
+                      Show Confidence Interval
+                    </label>
+                    <p className="text-xs text-slate-500">
+                      Display 95% confidence band
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-950/50 p-4 rounded-lg">
+                    <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
+                      <input
+                        type="checkbox"
+                        checked={showResiduals}
+                        onChange={(e) => {
+                          setShowResiduals(e.target.checked);
+                          setTimeout(updateChart, 50);
+                        }}
+                        className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500"
+                      />
+                      Show Residuals
+                    </label>
+                    <p className="text-xs text-slate-500">
+                      Display prediction errors
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-950/50 p-4 rounded-lg">
+                    <label className="block text-sm text-slate-300 mb-2">
+                      Polynomial Degree
+                    </label>
+                    <input
+                      type="number"
+                      min="2"
+                      max="6"
+                      value={polynomialDegree}
+                      onChange={(e) =>
+                        setPolynomialDegree(parseInt(e.target.value))
+                      }
+                      className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      For polynomial regression (2-6)
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Error/Success Messages */}
         {error && (
           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3">
@@ -647,10 +916,35 @@ export default function DataAnalysisApp() {
           <div className="mb-6 relative group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl opacity-20 blur transition duration-300"></div>
             <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
-              <h3 className="flex items-center gap-2 text-xl font-semibold mb-4 text-green-400">
-                <Award className="w-5 h-5" />
-                Best Fit Model
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="flex items-center gap-2 text-xl font-semibold text-green-400">
+                  <Award className="w-5 h-5" />
+                  Best Fit Model
+                </h3>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => exportChart("png")}
+                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-sm transition-all border border-slate-600"
+                  >
+                    <Download className="w-4 h-4" />
+                    PNG
+                  </button>
+                  <button
+                    onClick={() => exportData("csv")}
+                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-sm transition-all border border-slate-600"
+                  >
+                    <Download className="w-4 h-4" />
+                    CSV
+                  </button>
+                  <button
+                    onClick={() => exportData("json")}
+                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-sm transition-all border border-slate-600"
+                  >
+                    <Download className="w-4 h-4" />
+                    JSON
+                  </button>
+                </div>
+              </div>
               <div className="bg-slate-950/50 p-6 rounded-lg">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -769,7 +1063,8 @@ export default function DataAnalysisApp() {
                           <span className="text-yellow-400 font-mono">
                             {model.aic === null ||
                             model.aic === Infinity ||
-                            model.aic === -Infinity
+                            model.aic === -Infinity ||
+                            isNaN(model.aic)
                               ? "N/A"
                               : model.aic.toFixed(4)}
                           </span>
