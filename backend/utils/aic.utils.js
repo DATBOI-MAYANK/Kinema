@@ -1,28 +1,34 @@
-export function calculateAIC(n, k, r2) {
-  // Handle edge cases
-  if (r2 === null || isNaN(r2) || r2 < 0) {
+export function calculateAIC(n, k, sse) {
+  if (!Number.isFinite(n) || !Number.isFinite(k) || !Number.isFinite(sse)) {
     return null;
   }
 
-  // For perfect or near-perfect fits
-  if (r2 >= 0.99999) {
-    // Use a penalty based on model complexity
-    // More complex models get higher (worse) AIC
-    return -500 + k * 10;
+  if (n <= 0 || k <= 0 || sse < 0) {
+    return null;
   }
 
-  if (r2 <= 0.00001) {
-    // Very poor fit
-    return 1000 + k * 10;
+  const safeSSE = Math.max(sse, Number.EPSILON);
+  const sigma2 = safeSSE / n;
+
+  if (!Number.isFinite(sigma2) || sigma2 <= 0) {
+    return null;
   }
 
-  // Standard AIC calculation using R²
-  // AIC = n * ln(1 - R²) + 2k
-  const logTerm = Math.log(1 - r2);
+  return n * Math.log(sigma2) + 2 * k;
+}
 
-  if (!isFinite(logTerm)) {
-    return -500 + k * 10;
+export function calculateAICc(n, k, sse) {
+  const aic = calculateAIC(n, k, sse);
+
+  if (!Number.isFinite(aic)) {
+    return null;
   }
 
-  return n * logTerm + 2 * k;
+  const denominator = n - k - 1;
+
+  if (denominator <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return aic + (2 * k * (k + 1)) / denominator;
 }

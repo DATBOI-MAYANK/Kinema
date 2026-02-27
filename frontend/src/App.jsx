@@ -12,6 +12,7 @@ import {
   Award,
   Download,
   Settings,
+  ChevronDown,
 } from "lucide-react";
 import Chart from "chart.js/auto";
 
@@ -28,9 +29,24 @@ export default function DataAnalysisApp() {
   const [polynomialDegree, setPolynomialDegree] = useState(3);
   const [showConfidenceInterval, setShowConfidenceInterval] = useState(false);
   const [showResiduals, setShowResiduals] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("AUTO");
 
   // Backend API URL
   const API_URL = "http://localhost:3000/api/analyze";
+
+  function getActiveModel(results) {
+    if (!results || !results.bestModel) return null;
+
+    if (selectedModel === "AUTO") {
+      return results.bestModel;
+    }
+
+    const forcedModel = results.allModels?.find(
+      (model) => model.model === selectedModel,
+    );
+
+    return forcedModel || results.bestModel;
+  }
 
   function parseTextInputWithValidation(text) {
     const result = Papa.parse(text, {
@@ -78,6 +94,7 @@ export default function DataAnalysisApp() {
         body: JSON.stringify({
           data: dataPoints,
           polynomialDegree: polynomialDegree,
+          preferredModel: selectedModel === "AUTO" ? undefined : selectedModel,
         }),
       });
 
@@ -112,8 +129,8 @@ export default function DataAnalysisApp() {
   function evaluateLogarithmic(coefficients, x) {
     if (!coefficients || coefficients.length < 2) return null;
     if (x <= 0) return null;
-    const b = coefficients[0];
-    const a = coefficients[1];
+    const a = coefficients[0];
+    const b = coefficients[1];
     if (isNaN(a) || isNaN(b)) return null;
     return a + b * Math.log(x);
   }
@@ -128,24 +145,26 @@ export default function DataAnalysisApp() {
     return a * Math.pow(x, b);
   }
 
-  function calculateResiduals(data, bestModel) {
+  function calculateResiduals(data, modelToPlot) {
     return data.map(([x, y]) => {
       let predicted;
-      switch (bestModel.model) {
+      switch (modelToPlot.model) {
         case "Linear":
         case "Quadratic":
         case "Cubic":
         case "Quartic":
-          predicted = evaluatePolynomial(bestModel.coefficients, x);
+        case "Quintic":
+        case "Sextic":
+          predicted = evaluatePolynomial(modelToPlot.coefficients, x);
           break;
         case "Exponential":
-          predicted = evaluateExponential(bestModel.coefficients, x);
+          predicted = evaluateExponential(modelToPlot.coefficients, x);
           break;
         case "Logarithmic":
-          predicted = evaluateLogarithmic(bestModel.coefficients, x);
+          predicted = evaluateLogarithmic(modelToPlot.coefficients, x);
           break;
         case "Power":
-          predicted = evaluatePower(bestModel.coefficients, x);
+          predicted = evaluatePower(modelToPlot.coefficients, x);
           break;
         default:
           predicted = 0;
@@ -154,7 +173,7 @@ export default function DataAnalysisApp() {
     });
   }
 
-  function exportChart(format = "png") {
+  function exportChart(format = "jpg") {
     if (!chartInstance) return;
 
     const canvas = document.getElementById("regressionChart");
@@ -176,27 +195,31 @@ export default function DataAnalysisApp() {
     if (!analyzedData || !regressionResults) return;
 
     const data = analyzedData.data;
-    const bestModel = regressionResults.bestModel;
+    const activeModel = getActiveModel(regressionResults);
+
+    if (!activeModel) return;
 
     if (format === "csv") {
       let csv = "X,Y,Predicted,Residual\n";
       data.forEach(([x, y]) => {
         let predicted;
-        switch (bestModel.model) {
+        switch (activeModel.model) {
           case "Linear":
           case "Quadratic":
           case "Cubic":
           case "Quartic":
-            predicted = evaluatePolynomial(bestModel.coefficients, x);
+          case "Quintic":
+          case "Sextic":
+            predicted = evaluatePolynomial(activeModel.coefficients, x);
             break;
           case "Exponential":
-            predicted = evaluateExponential(bestModel.coefficients, x);
+            predicted = evaluateExponential(activeModel.coefficients, x);
             break;
           case "Logarithmic":
-            predicted = evaluateLogarithmic(bestModel.coefficients, x);
+            predicted = evaluateLogarithmic(activeModel.coefficients, x);
             break;
           case "Power":
-            predicted = evaluatePower(bestModel.coefficients, x);
+            predicted = evaluatePower(activeModel.coefficients, x);
             break;
           default:
             predicted = 0;
@@ -215,7 +238,7 @@ export default function DataAnalysisApp() {
     } else if (format === "json") {
       const exportObj = {
         originalData: data,
-        bestModel: bestModel,
+        bestModel: activeModel,
         allModels: regressionResults.allModels,
         statistics: analyzedData.stats,
       };
@@ -232,7 +255,9 @@ export default function DataAnalysisApp() {
     }
   }
 
-  function createChart(data, results) {
+  function createChart(data, modelToPlot) {
+    if (!modelToPlot) return;
+
     const canvas = document.getElementById("regressionChart");
     if (!canvas) return;
 
@@ -243,33 +268,36 @@ export default function DataAnalysisApp() {
     }
 
     const dataPoints = data.map(([x, y]) => ({ x, y }));
-    const bestModel = results.bestModel;
     const xValues = data.map(([x]) => x);
     const minX = Math.min(...xValues);
     const maxX = Math.max(...xValues);
-    const step = (maxX - minX) / 200;
+    const step = Math.max((maxX - minX) / 400, Number.EPSILON);
+    const pointRadius = data.length > 600 ? 1.5 : data.length > 250 ? 2 : 3;
+    const pointHoverRadius = data.length > 600 ? 4 : 7;
 
     const regressionLinePoints = [];
 
     for (let x = minX; x <= maxX; x += step) {
       let y;
 
-      switch (bestModel.model) {
+      switch (modelToPlot.model) {
         case "Linear":
         case "Quadratic":
         case "Cubic":
         case "Quartic":
-          y = evaluatePolynomial(bestModel.coefficients, x);
+        case "Quintic":
+        case "Sextic":
+          y = evaluatePolynomial(modelToPlot.coefficients, x);
           break;
         case "Exponential":
-          y = evaluateExponential(bestModel.coefficients, x);
+          y = evaluateExponential(modelToPlot.coefficients, x);
           break;
         case "Logarithmic":
-          y = evaluateLogarithmic(bestModel.coefficients, x);
+          y = evaluateLogarithmic(modelToPlot.coefficients, x);
           if (y === null) continue;
           break;
         case "Power":
-          y = evaluatePower(bestModel.coefficients, x);
+          y = evaluatePower(modelToPlot.coefficients, x);
           if (y === null) continue;
           break;
         default:
@@ -283,27 +311,32 @@ export default function DataAnalysisApp() {
       {
         label: "Original Data",
         data: dataPoints,
-        backgroundColor: "rgba(34, 211, 238, 0.8)",
-        borderColor: "rgba(34, 211, 238, 1)",
-        pointRadius: 6,
-        pointHoverRadius: 8,
+        backgroundColor: "rgba(34, 211, 238, 0.7)",
+        borderColor: "rgba(34, 211, 238, 0.95)",
+        pointRadius,
+        pointHoverRadius,
+        borderWidth: 1,
       },
       {
-        label: `${bestModel.model} Regression (Best Fit)`,
+        label:
+          selectedModel === "AUTO"
+            ? `${modelToPlot.model} Regression (Best Fit)`
+            : `${modelToPlot.model} Regression (Forced)`,
         data: regressionLinePoints,
         type: "line",
         borderColor: "rgba(168, 85, 247, 1)",
-        backgroundColor: "rgba(168, 85, 247, 0.1)",
-        borderWidth: 3,
+        backgroundColor: "rgba(168, 85, 247, 0.08)",
+        borderWidth: 2.5,
         pointRadius: 0,
+        pointHitRadius: 12,
         fill: false,
-        tension: 0.4,
+        tension: 0.25,
       },
     ];
 
     // Add confidence interval if enabled
-    if (showConfidenceInterval && bestModel.r2 > 0.5) {
-      const stdError = Math.sqrt((1 - bestModel.r2) / data.length) * 2;
+    if (showConfidenceInterval && modelToPlot.r2 > 0.5) {
+      const stdError = Math.sqrt((1 - modelToPlot.r2) / data.length) * 2;
       const upperBound = regressionLinePoints.map((p) => ({
         x: p.x,
         y: p.y + stdError,
@@ -317,26 +350,28 @@ export default function DataAnalysisApp() {
         label: "95% Confidence Interval",
         data: [...upperBound, ...lowerBound.reverse()],
         type: "line",
-        borderColor: "rgba(168, 85, 247, 0.3)",
-        backgroundColor: "rgba(168, 85, 247, 0.1)",
+        borderColor: "rgba(168, 85, 247, 0.24)",
+        backgroundColor: "rgba(168, 85, 247, 0.14)",
         borderWidth: 1,
         pointRadius: 0,
         fill: true,
-        tension: 0.4,
+        tension: 0.2,
       });
     }
 
     // Add residuals if enabled
     if (showResiduals) {
-      const residuals = calculateResiduals(data, bestModel);
+      const residuals = calculateResiduals(data, modelToPlot);
       datasets.push({
         label: "Residuals",
         data: residuals.map((r) => ({ x: r.x, y: r.residual })),
         type: "scatter",
-        backgroundColor: "rgba(239, 68, 68, 0.6)",
-        borderColor: "rgba(239, 68, 68, 1)",
-        pointRadius: 4,
-        pointStyle: "cross",
+        backgroundColor: "rgba(239, 68, 68, 0.75)",
+        borderColor: "rgba(239, 68, 68, 0.95)",
+        pointRadius: 2.75,
+        pointHoverRadius: 5,
+        pointStyle: "crossRot",
+        yAxisID: "yResidual",
       });
     }
 
@@ -346,25 +381,61 @@ export default function DataAnalysisApp() {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: {
+          mode: "nearest",
+          axis: "xy",
+          intersect: false,
+        },
+        animation: {
+          duration: 500,
+          easing: "easeOutQuart",
+        },
+        elements: {
+          point: {
+            hitRadius: 10,
+          },
+        },
         plugins: {
           legend: {
+            position: "top",
+            align: "start",
             labels: {
               color: "#cbd5e1",
-              font: { size: 14 },
+              font: { size: 12, weight: "600" },
+              usePointStyle: true,
+              pointStyle: "circle",
+              boxWidth: 10,
+              boxHeight: 10,
+              padding: 18,
             },
           },
           title: {
             display: true,
-            text: `${bestModel.model} Regression Analysis (R² = ${bestModel.r2.toFixed(4)})`,
+            text: `${modelToPlot.model} Regression • R² ${modelToPlot.r2.toFixed(4)}`,
             color: "#22d3ee",
-            font: { size: 18, weight: "bold" },
+            padding: { top: 8, bottom: 14 },
+            font: { size: 17, weight: "700" },
           },
           tooltip: {
             backgroundColor: "rgba(15, 23, 42, 0.9)",
             titleColor: "#22d3ee",
             bodyColor: "#cbd5e1",
-            borderColor: "rgba(34, 211, 238, 0.5)",
+            borderColor: "rgba(34, 211, 238, 0.45)",
             borderWidth: 1,
+            cornerRadius: 10,
+            padding: 10,
+            displayColors: true,
+            callbacks: {
+              title(items) {
+                if (!items?.length) return "";
+                return `x = ${Number(items[0].parsed.x).toFixed(4)}`;
+              },
+              label(context) {
+                const yValue = context.parsed?.y;
+                const series = context.dataset?.label || "Value";
+                return `${series}: ${Number(yValue).toFixed(6)}`;
+              },
+            },
           },
         },
         scales: {
@@ -373,13 +444,18 @@ export default function DataAnalysisApp() {
               display: true,
               text: "X Values",
               color: "#cbd5e1",
-              font: { size: 14 },
+              font: { size: 13, weight: "600" },
             },
             grid: {
-              color: "rgba(148, 163, 184, 0.1)",
+              color: "rgba(148, 163, 184, 0.12)",
+              borderDash: [4, 4],
             },
             ticks: {
               color: "#94a3b8",
+              maxTicksLimit: 12,
+              callback(value) {
+                return Number(value).toFixed(2);
+              },
             },
           },
           y: {
@@ -387,13 +463,33 @@ export default function DataAnalysisApp() {
               display: true,
               text: "Y Values",
               color: "#cbd5e1",
-              font: { size: 14 },
+              font: { size: 13, weight: "600" },
             },
             grid: {
-              color: "rgba(148, 163, 184, 0.1)",
+              color: "rgba(148, 163, 184, 0.12)",
+              borderDash: [4, 4],
             },
             ticks: {
               color: "#94a3b8",
+              callback(value) {
+                return Number(value).toFixed(2);
+              },
+            },
+          },
+          yResidual: {
+            display: showResiduals,
+            position: "right",
+            title: {
+              display: showResiduals,
+              text: "Residual",
+              color: "#fca5a5",
+              font: { size: 12, weight: "600" },
+            },
+            grid: {
+              drawOnChartArea: false,
+            },
+            ticks: {
+              color: "#fda4af",
             },
           },
         },
@@ -441,7 +537,7 @@ export default function DataAnalysisApp() {
       setRegressionResults(backendResults);
 
       setTimeout(() => {
-        createChart(result.validPairs, backendResults);
+        createChart(result.validPairs, getActiveModel(backendResults));
       }, 100);
 
       setIsAnalyzing(false);
@@ -522,7 +618,7 @@ export default function DataAnalysisApp() {
           setRegressionResults(backendResults);
 
           setTimeout(() => {
-            createChart(validPairs, backendResults);
+            createChart(validPairs, getActiveModel(backendResults));
           }, 100);
 
           setIsAnalyzing(false);
@@ -538,7 +634,7 @@ export default function DataAnalysisApp() {
     const samples = {
       linear: "0,0\n1,2\n2,4\n3,6\n4,8",
       quadratic: "0,0\n1,4.9\n2,19.6\n3,44.1\n4,78.4",
-      exponential: "0,2\n1,3\n2,4.5\n3,6.75\n4,10.125",
+      exponential: "-2, 0.25\n-1, 0.5\n0, 1\n1,2\n2,4\n3,8",
       logarithmic: "1,0\n2,0.693\n3,1.099\n4,1.386\n5,1.609",
       power: "1,1\n2,4\n3,9\n4,16\n5,25",
       cubic: "0,0\n1,1\n2,8\n3,27\n4,64\n5,125",
@@ -550,6 +646,7 @@ export default function DataAnalysisApp() {
     setPreviewRows([]);
     setAnalyzedData(null);
     setRegressionResults(null);
+    setSelectedModel("AUTO");
     if (chartInstance) {
       chartInstance.destroy();
       setChartInstance(null);
@@ -563,6 +660,7 @@ export default function DataAnalysisApp() {
     setFilename("");
     setAnalyzedData(null);
     setRegressionResults(null);
+    setSelectedModel("AUTO");
     if (chartInstance) {
       chartInstance.destroy();
       setChartInstance(null);
@@ -571,20 +669,27 @@ export default function DataAnalysisApp() {
 
   function updateChart() {
     if (analyzedData && regressionResults) {
-      createChart(analyzedData.data, regressionResults);
+      createChart(analyzedData.data, getActiveModel(regressionResults));
     }
   }
+
+  const activeModel = getActiveModel(regressionResults);
 
   return (
     <div className="min-h-screen p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8 text-center">
-          <div className="flex items-center justify-center gap-3 mb-3">
-            <Database className="w-8 h-8 text-cyan-400" />
-            <h2 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
-              Advanced Regression Analysis Portal
-            </h2>
+          <div className="flex flex-col items-center justify-center gap-3 mb-3">
+            <h1 className="text-5xl block font-bold bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+              Kinema
+            </h1>
+            <div className="flex gap-1">
+              <Database className="w-8 h-8 text-cyan-400" />
+              <h2 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+                An Advanced Regression Analysis Portal
+              </h2>
+            </div>
           </div>
           <p className="text-slate-400 text-sm">
             Upload or paste your experimental data for comprehensive regression
@@ -796,19 +901,76 @@ export default function DataAnalysisApp() {
             <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className="flex items-center gap-2 text-lg font-semibold mb-4 text-orange-400 hover:text-orange-300 transition-colors"
+                className="w-full flex items-center justify-between gap-2 text-lg font-semibold mb-4 text-orange-400 hover:text-orange-300 transition-colors"
               >
-                <Settings className="w-5 h-5" />
-                Advanced Options
-                <span className="text-sm text-slate-500">
-                  {showAdvanced ? "▼" : "▶"}
+                <span className="flex items-center gap-2">
+                  <Settings className="w-5 h-5" />
+                  Advanced Options
                 </span>
+                <ChevronDown
+                  className={`w-4 h-4 text-slate-400 transition-transform ${
+                    showAdvanced ? "rotate-180" : "rotate-0"
+                  }`}
+                />
               </button>
 
               {showAdvanced && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-slate-950/50 p-4 rounded-lg">
-                    <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded-lg border border-slate-700/70 bg-slate-950/60 p-3">
+                      <p className="text-xs uppercase tracking-wider text-slate-500">
+                        Model Mode
+                      </p>
+                      <p className="text-sm mt-1 text-cyan-300 font-semibold">
+                        {selectedModel === "AUTO" ? "Auto Best Fit" : "Forced"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-700/70 bg-slate-950/60 p-3">
+                      <p className="text-xs uppercase tracking-wider text-slate-500">
+                        Confidence Band
+                      </p>
+                      <p className="text-sm mt-1 text-purple-300 font-semibold">
+                        {showConfidenceInterval ? "Enabled" : "Disabled"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-700/70 bg-slate-950/60 p-3">
+                      <p className="text-xs uppercase tracking-wider text-slate-500">
+                        Residual Plot
+                      </p>
+                      <p className="text-sm mt-1 text-rose-300 font-semibold">
+                        {showResiduals ? "Enabled" : "Disabled"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                    <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
+                      <label className="block text-sm font-medium text-slate-200 mb-2">
+                      Plot Model
+                    </label>
+                    <select
+                      value={selectedModel}
+                      onChange={(e) => {
+                        setSelectedModel(e.target.value);
+                        setTimeout(updateChart, 50);
+                      }}
+                      className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    >
+                      <option value="AUTO">Auto Best Fit</option>
+                      {regressionResults.allModels.map((model, index) => (
+                        <option key={`${model.model}-${index}`} value={model.model}>
+                          {model.model}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Choose Auto or force any fitted model
+                    </p>
+                  </div>
+
+                    <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
+                    <label className="flex items-center justify-between gap-3 text-sm text-slate-300 mb-2">
+                      <span>Confidence Interval</span>
                       <input
                         type="checkbox"
                         checked={showConfidenceInterval}
@@ -818,15 +980,15 @@ export default function DataAnalysisApp() {
                         }}
                         className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500"
                       />
-                      Show Confidence Interval
                     </label>
                     <p className="text-xs text-slate-500">
                       Display 95% confidence band
                     </p>
                   </div>
 
-                  <div className="bg-slate-950/50 p-4 rounded-lg">
-                    <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
+                  <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
+                    <label className="flex items-center justify-between gap-3 text-sm text-slate-300 mb-2">
+                      <span>Residuals</span>
                       <input
                         type="checkbox"
                         checked={showResiduals}
@@ -836,15 +998,14 @@ export default function DataAnalysisApp() {
                         }}
                         className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500"
                       />
-                      Show Residuals
                     </label>
                     <p className="text-xs text-slate-500">
                       Display prediction errors
                     </p>
                   </div>
 
-                  <div className="bg-slate-950/50 p-4 rounded-lg">
-                    <label className="block text-sm text-slate-300 mb-2">
+                  <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
+                    <label className="block text-sm font-medium text-slate-200 mb-2">
                       Polynomial Degree
                     </label>
                     <input
@@ -855,12 +1016,13 @@ export default function DataAnalysisApp() {
                       onChange={(e) =>
                         setPolynomialDegree(parseInt(e.target.value))
                       }
-                      className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     />
                     <p className="text-xs text-slate-500 mt-1">
                       For polynomial regression (2-6)
                     </p>
                   </div>
+                </div>
                 </div>
               )}
             </div>
@@ -919,7 +1081,7 @@ export default function DataAnalysisApp() {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="flex items-center gap-2 text-xl font-semibold text-green-400">
                   <Award className="w-5 h-5" />
-                  Best Fit Model
+                  {selectedModel === "AUTO" ? "Best Fit Model" : "Selected Model"}
                 </h3>
                 <div className="flex gap-2">
                   <button
@@ -950,31 +1112,31 @@ export default function DataAnalysisApp() {
                   <div>
                     <p className="text-sm text-slate-400 mb-1">Model Type</p>
                     <p className="text-2xl font-bold text-cyan-400">
-                      {regressionResults.bestModel.model}
+                      {activeModel?.model}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm text-slate-400 mb-1">Equation</p>
                     <p className="text-lg font-mono text-purple-400 break-all">
-                      {regressionResults.bestModel.equation}
+                      {activeModel?.equation}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm text-slate-400 mb-1">R² Score</p>
                     <p className="text-2xl font-bold text-green-400">
-                      {regressionResults.bestModel.r2 === null ||
-                      isNaN(regressionResults.bestModel.r2)
+                      {activeModel?.r2 === null ||
+                      isNaN(activeModel?.r2)
                         ? "N/A"
-                        : regressionResults.bestModel.r2.toFixed(6)}
+                        : activeModel?.r2.toFixed(6)}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
-                      {regressionResults.bestModel.r2 === 1
+                      {activeModel?.r2 === 1
                         ? "Perfect fit"
-                        : regressionResults.bestModel.r2 > 0.95
+                        : activeModel?.r2 > 0.95
                           ? "Excellent fit"
-                          : regressionResults.bestModel.r2 > 0.85
+                          : activeModel?.r2 > 0.85
                             ? "Good fit"
-                            : regressionResults.bestModel.r2 > 0.7
+                            : activeModel?.r2 > 0.7
                               ? "Moderate fit"
                               : "Poor fit"}
                     </p>
@@ -982,12 +1144,12 @@ export default function DataAnalysisApp() {
                   <div>
                     <p className="text-sm text-slate-400 mb-1">AIC Value</p>
                     <p className="text-2xl font-bold text-yellow-400">
-                      {regressionResults.bestModel.aic === null ||
-                      regressionResults.bestModel.aic === Infinity ||
-                      regressionResults.bestModel.aic === -Infinity ||
-                      isNaN(regressionResults.bestModel.aic)
+                      {activeModel?.aic === null ||
+                      activeModel?.aic === Infinity ||
+                      activeModel?.aic === -Infinity ||
+                      isNaN(activeModel?.aic)
                         ? "N/A"
-                        : regressionResults.bestModel.aic.toFixed(4)}
+                        : activeModel?.aic.toFixed(4)}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
                       Lower is better
@@ -1031,7 +1193,7 @@ export default function DataAnalysisApp() {
                       <tr
                         key={index}
                         className={`border-b border-slate-800 hover:bg-slate-800/30 transition-colors ${
-                          model.model === regressionResults.bestModel.model
+                          model.model === activeModel?.model
                             ? "bg-green-500/10"
                             : model.r2 === null || isNaN(model.r2)
                               ? "opacity-50"
@@ -1041,8 +1203,7 @@ export default function DataAnalysisApp() {
                         <td className="px-4 py-3">
                           <span className="text-cyan-400 font-semibold flex items-center gap-2">
                             {model.model}
-                            {model.model ===
-                              regressionResults.bestModel.model && (
+                            {model.model === activeModel?.model && (
                               <Award className="w-4 h-4 text-yellow-400" />
                             )}
                           </span>

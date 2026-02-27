@@ -3,7 +3,7 @@ import { runRegressionAnalysis } from "../services/regression.service.js";
 
 const router = express.Router();
 router.post("/", (req, res) => {
-  const { data, polynomialDegree } = req.body;
+  const { data, polynomialDegree, preferredModel } = req.body;
 
   if (!Array.isArray(data) || data.length < 2) {
     return res.status(400).json({
@@ -12,7 +12,7 @@ router.post("/", (req, res) => {
   }
 
   try {
-    const result = runRegressionAnalysis(data, { polynomialDegree });
+    const result = runRegressionAnalysis(data, { polynomialDegree, preferredModel });
     res.json(result);
   } catch (err) {
     res.status(500).json({
