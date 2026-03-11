@@ -945,6 +945,14 @@ export default function DataAnalysisApp() {
 
                 <button
                   type="button"
+                  onClick={() => loadSample("sine")}
+                  className="bg-slate-800 text-slate-300 px-2 py-2 rounded-lg text-xs hover:bg-slate-700 transition-all border border-slate-700"
+                >
+                  Sine
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleClear}
                   className="col-span-2 bg-red-500/10 text-red-400 px-3 py-2 rounded-lg text-sm hover:bg-red-500/20 transition-all border border-red-500/30 flex items-center justify-center gap-2"
                 >

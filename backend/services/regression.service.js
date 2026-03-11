@@ -69,12 +69,13 @@ export function runRegressionAnalysis(data, options = {}) {
     { name: "Exponential", fn: () => regression.exponential(data) },
     { name: "Logarithmic", fn: () => regression.logarithmic(data) },
     { name: "Power", fn: () => regression.power(data) },
+    { name: "Sine", fn: () => regression.sine(data) },
   ];
 
   models.forEach((model) => {
     try {
       const res = model.fn();
-
+      console.log("SINE RESULT:", res);
       if (!res || !Array.isArray(res.equation) || res.equation.length === 0) {
         return;
       }
