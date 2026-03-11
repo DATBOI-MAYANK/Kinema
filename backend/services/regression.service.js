@@ -50,7 +50,10 @@ function calculateModelMetrics(data, predictFn) {
 
 export function runRegressionAnalysis(data, options = {}) {
   const results = [];
-  const polynomialDegree = Math.max(1, Math.min(6, options.polynomialDegree || 3));
+  const polynomialDegree = Math.max(
+    1,
+    Math.min(6, options.polynomialDegree || 3),
+  );
   const preferredModel = options.preferredModel;
 
   const models = [
@@ -93,7 +96,9 @@ export function runRegressionAnalysis(data, options = {}) {
       const aic = calculateAIC(n, k, metrics.sse);
       const aicc = calculateAICc(n, k, metrics.sse);
 
-      if ((aic === null || !Number.isFinite(aic)) && !Number.isFinite(aicc)) {
+      // Require at least a valid AIC; over-parameterized models (aicc=+Inf) are
+      // still kept so we can penalise them in sorting below.
+      if (aic === null || !Number.isFinite(aic)) {
         return;
       }
 
@@ -105,6 +110,7 @@ export function runRegressionAnalysis(data, options = {}) {
         aicc: Number.isFinite(aicc) ? aicc : null,
         sse: metrics.sse,
         coefficients: res.equation,
+        k,
       });
     } catch (e) {
       console.log(`${model.name} model failed:`, e.message);
@@ -120,13 +126,32 @@ export function runRegressionAnalysis(data, options = {}) {
   }
 
   validResults.sort((a, b) => {
-    const scoreA = Number.isFinite(a.aicc) ? a.aicc : a.aic;
-    const scoreB = Number.isFinite(b.aicc) ? b.aicc : b.aic;
+    const aOverParam = a.aicc === null; // aicc was +Inf → n-k-1 <= 0
+    const bOverParam = b.aicc === null;
 
-    if (scoreA !== scoreB) {
+    // Over-parameterised models always lose to properly-penalised ones.
+    if (aOverParam !== bOverParam) {
+      return aOverParam ? 1 : -1;
+    }
+
+    const scoreA = a.aicc !== null ? a.aicc : a.aic;
+    const scoreB = b.aicc !== null ? b.aicc : b.aic;
+
+    // When both scores are effectively -Infinity (near-perfect SSE ≈ 0 for
+    // multiple models) the numerical difference is meaningless, so fall back
+    // to Occam's razor: prefer the model with fewer parameters.
+    const NEAR_INF = -1e10;
+    if (scoreA < NEAR_INF && scoreB < NEAR_INF) {
+      if (a.k !== b.k) return a.k - b.k;
+      return b.r2 - a.r2;
+    }
+
+    if (Math.abs(scoreA - scoreB) > 1e-8) {
       return scoreA - scoreB;
     }
 
+    // Scores are numerically equal — again prefer parsimony, then r².
+    if (a.k !== b.k) return a.k - b.k;
     return b.r2 - a.r2;
   });
 
@@ -134,7 +159,8 @@ export function runRegressionAnalysis(data, options = {}) {
 
   if (preferredModel) {
     const preferred = validResults.find(
-      (model) => model.model.toLowerCase() === String(preferredModel).toLowerCase(),
+      (model) =>
+        model.model.toLowerCase() === String(preferredModel).toLowerCase(),
     );
     if (preferred) {
       bestModel = preferred;

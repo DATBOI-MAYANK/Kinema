@@ -173,22 +173,28 @@ export default function DataAnalysisApp() {
     });
   }
 
-  function exportChart(format = "jpg") {
+  function exportChart() {
     if (!chartInstance) return;
 
     const canvas = document.getElementById("regressionChart");
     if (!canvas) return;
 
-    if (format === "png" || format === "jpg") {
-      const url = canvas.toDataURL(`image/${format}`, 1.0);
-      const link = document.createElement("a");
-      link.download = `regression-analysis.${format}`;
-      link.href = url;
-      link.click();
-    } else if (format === "svg") {
-      // For SVG, we'll export the data as CSV instead since Chart.js uses canvas
-      exportData("csv");
-    }
+    // Composite chart onto a background-filled canvas so JPEG has no black/transparent areas
+    const offscreen = document.createElement("canvas");
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+    const offCtx = offscreen.getContext("2d");
+
+    // Fill with the app's dark background colour
+    offCtx.fillStyle = "#0f172a";
+    offCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+    offCtx.drawImage(canvas, 0, 0);
+
+    const url = offscreen.toDataURL("image/jpeg", 0.95);
+    const link = document.createElement("a");
+    link.download = "regression-analysis.jpg";
+    link.href = url;
+    link.click();
   }
 
   function exportData(format = "csv") {
@@ -255,6 +261,78 @@ export default function DataAnalysisApp() {
     }
   }
 
+  // LTTB decimation — keeps at most `threshold` points while preserving visual shape
+  function decimatePoints(points, threshold) {
+    if (points.length <= threshold) return points;
+
+    const sampled = [points[0]];
+    const bucketSize = (points.length - 2) / (threshold - 2);
+    let a = 0; // previously selected index
+
+    for (let i = 0; i < threshold - 2; i++) {
+      const bucketStart = Math.floor((i + 1) * bucketSize) + 1;
+      const bucketEnd = Math.min(
+        Math.floor((i + 2) * bucketSize) + 1,
+        points.length - 1,
+      );
+
+      // Average of next bucket (lookahead centroid)
+      let avgX = 0,
+        avgY = 0;
+      const nextBucketEnd = Math.min(
+        Math.floor((i + 2) * bucketSize) + 1,
+        points.length - 1,
+      );
+      const nextBucketStart = Math.floor((i + 2) * bucketSize) + 1;
+      let count = 0;
+      for (let j = nextBucketStart; j < nextBucketEnd; j++) {
+        avgX += points[j][0];
+        avgY += points[j][1];
+        count++;
+      }
+      if (count > 0) {
+        avgX /= count;
+        avgY /= count;
+      }
+
+      // Pick point in current bucket that forms largest triangle with a and centroid
+      let maxArea = -1;
+      let maxIdx = bucketStart;
+      const ax = points[a][0],
+        ay = points[a][1];
+      for (let j = bucketStart; j < bucketEnd; j++) {
+        const area =
+          Math.abs(
+            (ax - avgX) * (points[j][1] - ay) -
+              (ax - points[j][0]) * (avgY - ay),
+          ) * 0.5;
+        if (area > maxArea) {
+          maxArea = area;
+          maxIdx = j;
+        }
+      }
+
+      sampled.push(points[maxIdx]);
+      a = maxIdx;
+    }
+
+    sampled.push(points[points.length - 1]);
+    return sampled;
+  }
+
+  // Smart tick formatter — avoids ugly floating-point noise
+  function smartTick(value) {
+    const abs = Math.abs(value);
+    if (abs === 0) return "0";
+    if (abs >= 1e6 || (abs < 1e-3 && abs > 0)) {
+      return Number(value).toExponential(2);
+    }
+    if (Number.isInteger(value)) return String(value);
+    // Choose decimal places based on magnitude
+    const decimals = abs >= 100 ? 1 : abs >= 1 ? 2 : 3;
+    return Number(value).toFixed(decimals);
+  }
+
   function createChart(data, modelToPlot) {
     if (!modelToPlot) return;
 
@@ -267,19 +345,54 @@ export default function DataAnalysisApp() {
       chartInstance.destroy();
     }
 
-    const dataPoints = data.map(([x, y]) => ({ x, y }));
+    // ── Palette ────────────────────────────────────────────────────────────
+    const C_DATA_FILL = "rgba(34, 211, 238, 0.55)";
+    const C_DATA_BORDER = "rgba(34, 211, 238, 0.9)";
+    const C_LINE = "rgba(168, 85, 247, 1)";
+    const C_LINE_FILL = "rgba(168, 85, 247, 0.07)";
+    const C_CI_BORDER = "rgba(168, 85, 247, 0.3)";
+    const C_CI_FILL = "rgba(168, 85, 247, 0.1)";
+    const C_RESID_FILL = "rgba(251, 113, 133, 0.7)";
+    const C_RESID_BDR = "rgba(251, 113, 133, 0.95)";
+    const C_GRID = "rgba(148, 163, 184, 0.08)";
+    const C_GRID_ZERO = "rgba(148, 163, 184, 0.25)";
+    const C_AXIS_LABEL = "#94a3b8";
+    const C_AXIS_TITLE = "#cbd5e1";
+    const C_TITLE = "#e2e8f0";
+    const C_TOOLTIP_BG = "rgba(2, 6, 23, 0.95)";
+    const C_TOOLTIP_BDR = "rgba(34, 211, 238, 0.4)";
+
+    // ── Responsive sizing ──────────────────────────────────────────────────
+    const isMobile = window.innerWidth < 640;
+    const titleSize = isMobile ? 13 : 15;
+    const axisLabelSize = isMobile ? 11 : 12;
+    const tickSize = isMobile ? 10 : 11;
+    const legendSize = isMobile ? 10 : 11;
+
+    // ── Point decimation for large datasets ───────────────────────────────
+    const MAX_RENDER_PTS = 600;
+    const rawPairs = data.map(([x, y]) => [x, y]);
+    const decimated = decimatePoints(rawPairs, MAX_RENDER_PTS);
+    const wasDecimated = decimated.length < data.length;
+    const dataPoints = decimated.map(([x, y]) => ({ x, y }));
+
+    // Point visual sizing — still reduce for large sets but not excessively
+    const n = decimated.length;
+    const pointRadius = n > 400 ? 2 : n > 150 ? 2.5 : 3.5;
+    const pointHoverRadius = n > 400 ? 6 : 8;
+
+    // ── Regression curve (always 500 smooth steps, independent of n) ──────
     const xValues = data.map(([x]) => x);
     const minX = Math.min(...xValues);
     const maxX = Math.max(...xValues);
-    const step = Math.max((maxX - minX) / 400, Number.EPSILON);
-    const pointRadius = data.length > 600 ? 1.5 : data.length > 250 ? 2 : 3;
-    const pointHoverRadius = data.length > 600 ? 4 : 7;
+    const xRange = maxX - minX;
+    const step = Math.max(xRange / 500, Number.EPSILON);
+    // 3% padding so edge points aren't clipped
+    const padX = xRange * 0.03;
 
     const regressionLinePoints = [];
-
-    for (let x = minX; x <= maxX; x += step) {
+    for (let x = minX - padX; x <= maxX + padX + step * 0.5; x += step) {
       let y;
-
       switch (modelToPlot.model) {
         case "Linear":
         case "Quadratic":
@@ -303,38 +416,49 @@ export default function DataAnalysisApp() {
         default:
           y = 0;
       }
-
+      if (!Number.isFinite(y)) continue;
       regressionLinePoints.push({ x, y });
     }
 
+    // ── Chart title — include decimation notice if active ─────────────────
+    const r2Str = modelToPlot.r2.toFixed(4);
+    const decimNote = wasDecimated
+      ? `  •  showing ${decimated.length.toLocaleString()} / ${data.length.toLocaleString()} pts`
+      : "";
+    const chartTitle = `${modelToPlot.model} Regression  •  R² = ${r2Str}${decimNote}`;
+
+    // ── Datasets ──────────────────────────────────────────────────────────
     const datasets = [
       {
-        label: "Original Data",
+        label: "Data Points",
         data: dataPoints,
-        backgroundColor: "rgba(34, 211, 238, 0.7)",
-        borderColor: "rgba(34, 211, 238, 0.95)",
+        backgroundColor: C_DATA_FILL,
+        borderColor: C_DATA_BORDER,
         pointRadius,
         pointHoverRadius,
+        pointHoverBackgroundColor: "#fff",
         borderWidth: 1,
+        order: 2,
       },
       {
         label:
           selectedModel === "AUTO"
-            ? `${modelToPlot.model} Regression (Best Fit)`
-            : `${modelToPlot.model} Regression (Forced)`,
+            ? `${modelToPlot.model} Fit (best)`
+            : `${modelToPlot.model} Fit (forced)`,
         data: regressionLinePoints,
         type: "line",
-        borderColor: "rgba(168, 85, 247, 1)",
-        backgroundColor: "rgba(168, 85, 247, 0.08)",
-        borderWidth: 2.5,
+        borderColor: C_LINE,
+        backgroundColor: C_LINE_FILL,
+        borderWidth: 2,
         pointRadius: 0,
-        pointHitRadius: 12,
+        pointHitRadius: 14,
         fill: false,
-        tension: 0.25,
+        tension: 0, // straight segments between computed steps = most accurate
+        order: 1,
       },
     ];
 
-    // Add confidence interval if enabled
+    // Confidence interval
     if (showConfidenceInterval && modelToPlot.r2 > 0.5) {
       const stdError = Math.sqrt((1 - modelToPlot.r2) / data.length) * 2;
       const upperBound = regressionLinePoints.map((p) => ({
@@ -347,93 +471,112 @@ export default function DataAnalysisApp() {
       }));
 
       datasets.push({
-        label: "95% Confidence Interval",
+        label: "95% Confidence Band",
         data: [...upperBound, ...lowerBound.reverse()],
         type: "line",
-        borderColor: "rgba(168, 85, 247, 0.24)",
-        backgroundColor: "rgba(168, 85, 247, 0.14)",
+        borderColor: C_CI_BORDER,
+        backgroundColor: C_CI_FILL,
         borderWidth: 1,
+        borderDash: [4, 3],
         pointRadius: 0,
         fill: true,
-        tension: 0.2,
+        tension: 0,
+        order: 3,
       });
     }
 
-    // Add residuals if enabled
+    // Residuals (also decimated to match scatter)
     if (showResiduals) {
-      const residuals = calculateResiduals(data, modelToPlot);
+      const allResiduals = calculateResiduals(data, modelToPlot);
+      const residualPairs = allResiduals.map((r) => [r.x, r.residual]);
+      const decimatedResiduals = decimatePoints(residualPairs, MAX_RENDER_PTS);
       datasets.push({
         label: "Residuals",
-        data: residuals.map((r) => ({ x: r.x, y: r.residual })),
+        data: decimatedResiduals.map(([x, y]) => ({ x, y })),
         type: "scatter",
-        backgroundColor: "rgba(239, 68, 68, 0.75)",
-        borderColor: "rgba(239, 68, 68, 0.95)",
-        pointRadius: 2.75,
+        backgroundColor: C_RESID_FILL,
+        borderColor: C_RESID_BDR,
+        pointRadius: isMobile ? 2 : 2.5,
         pointHoverRadius: 5,
         pointStyle: "crossRot",
         yAxisID: "yResidual",
+        order: 4,
       });
     }
 
+    // ── Chart.js config ───────────────────────────────────────────────────
     const newChart = new Chart(ctx, {
       type: "scatter",
       data: { datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        devicePixelRatio: window.devicePixelRatio || 2,
         interaction: {
           mode: "nearest",
           axis: "xy",
           intersect: false,
         },
         animation: {
-          duration: 500,
-          easing: "easeOutQuart",
+          duration: 400,
+          easing: "easeOutCubic",
         },
         elements: {
-          point: {
-            hitRadius: 10,
+          point: { hitRadius: 10 },
+        },
+        layout: {
+          padding: {
+            top: 4,
+            right: isMobile ? 8 : 16,
+            bottom: 4,
+            left: isMobile ? 4 : 8,
           },
         },
         plugins: {
           legend: {
-            position: "top",
-            align: "start",
+            position: isMobile ? "bottom" : "top",
+            align: isMobile ? "center" : "start",
             labels: {
-              color: "#cbd5e1",
-              font: { size: 12, weight: "600" },
+              color: C_AXIS_TITLE,
+              font: { size: legendSize, weight: "500" },
               usePointStyle: true,
               pointStyle: "circle",
-              boxWidth: 10,
-              boxHeight: 10,
-              padding: 18,
+              boxWidth: 8,
+              boxHeight: 8,
+              padding: isMobile ? 10 : 16,
             },
           },
           title: {
             display: true,
-            text: `${modelToPlot.model} Regression • R² ${modelToPlot.r2.toFixed(4)}`,
-            color: "#22d3ee",
-            padding: { top: 8, bottom: 14 },
-            font: { size: 17, weight: "700" },
+            text: chartTitle,
+            color: C_TITLE,
+            padding: { top: 6, bottom: isMobile ? 8 : 12 },
+            font: {
+              size: titleSize,
+              weight: "600",
+              family: "'Inter', sans-serif",
+            },
           },
           tooltip: {
-            backgroundColor: "rgba(15, 23, 42, 0.9)",
+            backgroundColor: C_TOOLTIP_BG,
             titleColor: "#22d3ee",
             bodyColor: "#cbd5e1",
-            borderColor: "rgba(34, 211, 238, 0.45)",
+            footerColor: "#94a3b8",
+            borderColor: C_TOOLTIP_BDR,
             borderWidth: 1,
-            cornerRadius: 10,
-            padding: 10,
+            cornerRadius: 8,
+            padding: isMobile ? 8 : 12,
             displayColors: true,
+            caretSize: 5,
             callbacks: {
               title(items) {
                 if (!items?.length) return "";
-                return `x = ${Number(items[0].parsed.x).toFixed(4)}`;
+                return `x = ${smartTick(Number(items[0].parsed.x))}`;
               },
               label(context) {
                 const yValue = context.parsed?.y;
-                const series = context.dataset?.label || "Value";
-                return `${series}: ${Number(yValue).toFixed(6)}`;
+                const series = context.dataset?.label ?? "Value";
+                return `  ${series}: ${smartTick(Number(yValue))}`;
               },
             },
           },
@@ -441,38 +584,51 @@ export default function DataAnalysisApp() {
         scales: {
           x: {
             title: {
-              display: true,
-              text: "X Values",
-              color: "#cbd5e1",
-              font: { size: 13, weight: "600" },
+              display: !isMobile,
+              text: "X",
+              color: C_AXIS_TITLE,
+              font: { size: axisLabelSize, weight: "600" },
             },
             grid: {
-              color: "rgba(148, 163, 184, 0.12)",
-              borderDash: [4, 4],
+              color(ctx) {
+                return ctx.tick?.value === 0 ? C_GRID_ZERO : C_GRID;
+              },
+              lineWidth(ctx) {
+                return ctx.tick?.value === 0 ? 1.5 : 1;
+              },
             },
+            border: { color: "rgba(148,163,184,0.2)" },
             ticks: {
-              color: "#94a3b8",
-              maxTicksLimit: 12,
+              color: C_AXIS_LABEL,
+              maxTicksLimit: isMobile ? 6 : 10,
+              font: { size: tickSize },
               callback(value) {
-                return Number(value).toFixed(2);
+                return smartTick(Number(value));
               },
             },
           },
           y: {
             title: {
-              display: true,
-              text: "Y Values",
-              color: "#cbd5e1",
-              font: { size: 13, weight: "600" },
+              display: !isMobile,
+              text: "Y",
+              color: C_AXIS_TITLE,
+              font: { size: axisLabelSize, weight: "600" },
             },
             grid: {
-              color: "rgba(148, 163, 184, 0.12)",
-              borderDash: [4, 4],
+              color(ctx) {
+                return ctx.tick?.value === 0 ? C_GRID_ZERO : C_GRID;
+              },
+              lineWidth(ctx) {
+                return ctx.tick?.value === 0 ? 1.5 : 1;
+              },
             },
+            border: { color: "rgba(148,163,184,0.2)" },
             ticks: {
-              color: "#94a3b8",
+              color: C_AXIS_LABEL,
+              maxTicksLimit: isMobile ? 6 : 8,
+              font: { size: tickSize },
               callback(value) {
-                return Number(value).toFixed(2);
+                return smartTick(Number(value));
               },
             },
           },
@@ -480,16 +636,19 @@ export default function DataAnalysisApp() {
             display: showResiduals,
             position: "right",
             title: {
-              display: showResiduals,
+              display: showResiduals && !isMobile,
               text: "Residual",
-              color: "#fca5a5",
-              font: { size: 12, weight: "600" },
+              color: C_RESID_BDR,
+              font: { size: axisLabelSize, weight: "600" },
             },
-            grid: {
-              drawOnChartArea: false,
-            },
+            grid: { drawOnChartArea: false },
+            border: { color: "rgba(148,163,184,0.2)" },
             ticks: {
               color: "#fda4af",
+              font: { size: tickSize },
+              callback(value) {
+                return smartTick(Number(value));
+              },
             },
           },
         },
@@ -946,83 +1105,86 @@ export default function DataAnalysisApp() {
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                     <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
                       <label className="block text-sm font-medium text-slate-200 mb-2">
-                      Plot Model
-                    </label>
-                    <select
-                      value={selectedModel}
-                      onChange={(e) => {
-                        setSelectedModel(e.target.value);
-                        setTimeout(updateChart, 50);
-                      }}
-                      className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    >
-                      <option value="AUTO">Auto Best Fit</option>
-                      {regressionResults.allModels.map((model, index) => (
-                        <option key={`${model.model}-${index}`} value={model.model}>
-                          {model.model}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Choose Auto or force any fitted model
-                    </p>
-                  </div>
+                        Plot Model
+                      </label>
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => {
+                          setSelectedModel(e.target.value);
+                          setTimeout(updateChart, 50);
+                        }}
+                        className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      >
+                        <option value="AUTO">Auto Best Fit</option>
+                        {regressionResults.allModels.map((model, index) => (
+                          <option
+                            key={`${model.model}-${index}`}
+                            value={model.model}
+                          >
+                            {model.model}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Choose Auto or force any fitted model
+                      </p>
+                    </div>
 
                     <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
-                    <label className="flex items-center justify-between gap-3 text-sm text-slate-300 mb-2">
-                      <span>Confidence Interval</span>
-                      <input
-                        type="checkbox"
-                        checked={showConfidenceInterval}
-                        onChange={(e) => {
-                          setShowConfidenceInterval(e.target.checked);
-                          setTimeout(updateChart, 50);
-                        }}
-                        className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500"
-                      />
-                    </label>
-                    <p className="text-xs text-slate-500">
-                      Display 95% confidence band
-                    </p>
-                  </div>
+                      <label className="flex items-center justify-between gap-3 text-sm text-slate-300 mb-2">
+                        <span>Confidence Interval</span>
+                        <input
+                          type="checkbox"
+                          checked={showConfidenceInterval}
+                          onChange={(e) => {
+                            setShowConfidenceInterval(e.target.checked);
+                            setTimeout(updateChart, 50);
+                          }}
+                          className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500"
+                        />
+                      </label>
+                      <p className="text-xs text-slate-500">
+                        Display 95% confidence band
+                      </p>
+                    </div>
 
-                  <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
-                    <label className="flex items-center justify-between gap-3 text-sm text-slate-300 mb-2">
-                      <span>Residuals</span>
-                      <input
-                        type="checkbox"
-                        checked={showResiduals}
-                        onChange={(e) => {
-                          setShowResiduals(e.target.checked);
-                          setTimeout(updateChart, 50);
-                        }}
-                        className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500"
-                      />
-                    </label>
-                    <p className="text-xs text-slate-500">
-                      Display prediction errors
-                    </p>
-                  </div>
+                    <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
+                      <label className="flex items-center justify-between gap-3 text-sm text-slate-300 mb-2">
+                        <span>Residuals</span>
+                        <input
+                          type="checkbox"
+                          checked={showResiduals}
+                          onChange={(e) => {
+                            setShowResiduals(e.target.checked);
+                            setTimeout(updateChart, 50);
+                          }}
+                          className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500"
+                        />
+                      </label>
+                      <p className="text-xs text-slate-500">
+                        Display prediction errors
+                      </p>
+                    </div>
 
-                  <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
-                    <label className="block text-sm font-medium text-slate-200 mb-2">
-                      Polynomial Degree
-                    </label>
-                    <input
-                      type="number"
-                      min="2"
-                      max="6"
-                      value={polynomialDegree}
-                      onChange={(e) =>
-                        setPolynomialDegree(parseInt(e.target.value))
-                      }
-                      className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    />
-                    <p className="text-xs text-slate-500 mt-1">
-                      For polynomial regression (2-6)
-                    </p>
+                    <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-700/60">
+                      <label className="block text-sm font-medium text-slate-200 mb-2">
+                        Polynomial Degree
+                      </label>
+                      <input
+                        type="number"
+                        min="2"
+                        max="6"
+                        value={polynomialDegree}
+                        onChange={(e) =>
+                          setPolynomialDegree(parseInt(e.target.value))
+                        }
+                        className="w-full bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        For polynomial regression (2-6)
+                      </p>
+                    </div>
                   </div>
-                </div>
                 </div>
               )}
             </div>
@@ -1081,15 +1243,17 @@ export default function DataAnalysisApp() {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="flex items-center gap-2 text-xl font-semibold text-green-400">
                   <Award className="w-5 h-5" />
-                  {selectedModel === "AUTO" ? "Best Fit Model" : "Selected Model"}
+                  {selectedModel === "AUTO"
+                    ? "Best Fit Model"
+                    : "Selected Model"}
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={() => exportChart("png")}
+                    onClick={exportChart}
                     className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-sm transition-all border border-slate-600"
                   >
                     <Download className="w-4 h-4" />
-                    PNG
+                    Export JPG
                   </button>
                   <button
                     onClick={() => exportData("csv")}
@@ -1124,8 +1288,7 @@ export default function DataAnalysisApp() {
                   <div>
                     <p className="text-sm text-slate-400 mb-1">R² Score</p>
                     <p className="text-2xl font-bold text-green-400">
-                      {activeModel?.r2 === null ||
-                      isNaN(activeModel?.r2)
+                      {activeModel?.r2 === null || isNaN(activeModel?.r2)
                         ? "N/A"
                         : activeModel?.r2.toFixed(6)}
                     </p>
@@ -1248,11 +1411,11 @@ export default function DataAnalysisApp() {
                 <TrendingUp className="w-5 h-5" />
                 Visualization
               </h3>
-              <div
-                className="bg-slate-950/50 p-4 rounded-xl"
-                style={{ height: "500px" }}
-              >
-                <canvas id="regressionChart"></canvas>
+              <div className="bg-slate-950/50 p-2 sm:p-4 rounded-xl relative h-[320px] sm:h-[420px] lg:h-[520px]">
+                <canvas
+                  id="regressionChart"
+                  className="absolute inset-0 w-full h-full"
+                ></canvas>
               </div>
             </div>
           </div>
