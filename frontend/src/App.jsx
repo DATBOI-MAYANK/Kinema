@@ -15,6 +15,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import Chart from "chart.js/auto";
+import { evaluate } from "mathjs";
 
 export default function DataAnalysisApp() {
   const [text, setText] = useState("");
@@ -30,6 +31,8 @@ export default function DataAnalysisApp() {
   const [showConfidenceInterval, setShowConfidenceInterval] = useState(false);
   const [showResiduals, setShowResiduals] = useState(false);
   const [selectedModel, setSelectedModel] = useState("AUTO");
+  const [inputMode, setInputMode] = useState("pairs"); // 'pairs' | 'x-only' | 'equation'
+  const [equation, setEquation] = useState("");
 
   // Backend API URL
   const API_URL = "http://localhost:3000/api/analyze";
@@ -48,8 +51,38 @@ export default function DataAnalysisApp() {
     return forcedModel || results.bestModel;
   }
 
-  function parseTextInputWithValidation(text) {
-    const result = Papa.parse(text, {
+  function generateEquationPoints(expression) {
+    const points = [];
+    if (!expression || expression.trim() === "") return points;
+
+    // sample from -10 to 10
+    for (let x = -10; x <= 10; x += 0.2) {
+      try {
+        const y = evaluate(expression, { x });
+        if (Number.isFinite(y)) {
+          points.push([x, y]);
+        }
+      } catch {
+        // ignore evaluation errors for some x values
+      }
+    }
+
+    return points;
+  }
+
+  function predictY(model, x) {
+    if (!model) return 0;
+    if (model.model === "Linear") {
+      const [m, c] = model.coefficients;
+      return m * x + c;
+    }
+    // other model predictions handled elsewhere
+    return 0;
+  }
+
+  function parseTextInputWithValidation(textInput, mode = "pairs") {
+    const result = Papa.parse(textInput, {
+      header: true,
       skipEmptyLines: true,
       dynamicTyping: true,
     });
@@ -58,19 +91,31 @@ export default function DataAnalysisApp() {
     const badLines = [];
 
     result.data.forEach((row, index) => {
-      if (index === 0 && typeof row[0] === "string") return;
+      // If Papa parsed with header:true, rows may be objects; convert to values
+      const values = Array.isArray(row) ? row : Object.values(row);
+      const x = values[0];
+      const y = values[1];
 
-      const x = row[0];
-      const y = row[1];
-
-      if (Number.isFinite(x) && Number.isFinite(y)) {
-        validPairs.push([x, y]);
-      } else {
-        badLines.push({
-          rowNumber: index + 1,
-          rowData: row,
-          reason: "Non-numeric or missing value",
-        });
+      if (mode === "pairs") {
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          validPairs.push([x, y]);
+        } else {
+          badLines.push({
+            rowNumber: index + 1,
+            rowData: row,
+            reason: "Invalid x,y pairs",
+          });
+        }
+      } else if (mode === "x-only") {
+        if (Number.isFinite(x)) {
+          validPairs.push([x, null]); // Y will be predicted later
+        } else {
+          badLines.push({
+            rowNumber: index + 1,
+            rowData: row,
+            reason: "Invalid x value",
+          });
+        }
       }
     });
 
@@ -334,7 +379,12 @@ export default function DataAnalysisApp() {
   }
 
   function createChart(data, modelToPlot) {
-    if (!modelToPlot) return;
+    // Allow data-only plotting when modelToPlot isn't provided: use a sentinel
+    const plotModel = modelToPlot || {
+      model: "DataOnly",
+      r2: 0,
+      coefficients: [],
+    };
 
     const canvas = document.getElementById("regressionChart");
     if (!canvas) return;
@@ -385,47 +435,54 @@ export default function DataAnalysisApp() {
     const xValues = data.map(([x]) => x);
     const minX = Math.min(...xValues);
     const maxX = Math.max(...xValues);
-    const xRange = maxX - minX;
+    const xRange = maxX - minX || 1;
     const step = Math.max(xRange / 500, Number.EPSILON);
     // 3% padding so edge points aren't clipped
     const padX = xRange * 0.03;
 
     const regressionLinePoints = [];
-    for (let x = minX - padX; x <= maxX + padX + step * 0.5; x += step) {
-      let y;
-      switch (modelToPlot.model) {
-        case "Linear":
-        case "Quadratic":
-        case "Cubic":
-        case "Quartic":
-        case "Quintic":
-        case "Sextic":
-          y = evaluatePolynomial(modelToPlot.coefficients, x);
-          break;
-        case "Exponential":
-          y = evaluateExponential(modelToPlot.coefficients, x);
-          break;
-        case "Logarithmic":
-          y = evaluateLogarithmic(modelToPlot.coefficients, x);
-          if (y === null) continue;
-          break;
-        case "Power":
-          y = evaluatePower(modelToPlot.coefficients, x);
-          if (y === null) continue;
-          break;
-        default:
-          y = 0;
+
+    // Only generate regression line for real fitted models
+    if (plotModel.model !== "DataOnly") {
+      for (let x = minX - padX; x <= maxX + padX + step * 0.5; x += step) {
+        let y;
+        switch (plotModel.model) {
+          case "Linear":
+          case "Quadratic":
+          case "Cubic":
+          case "Quartic":
+          case "Quintic":
+          case "Sextic":
+            y = evaluatePolynomial(plotModel.coefficients, x);
+            break;
+          case "Exponential":
+            y = evaluateExponential(plotModel.coefficients, x);
+            break;
+          case "Logarithmic":
+            y = evaluateLogarithmic(plotModel.coefficients, x);
+            if (y === null) continue;
+            break;
+          case "Power":
+            y = evaluatePower(plotModel.coefficients, x);
+            if (y === null) continue;
+            break;
+          default:
+            y = 0;
+        }
+        if (!Number.isFinite(y)) continue;
+        regressionLinePoints.push({ x, y });
       }
-      if (!Number.isFinite(y)) continue;
-      regressionLinePoints.push({ x, y });
     }
 
     // ── Chart title — include decimation notice if active ─────────────────
-    const r2Str = modelToPlot.r2.toFixed(4);
+    const r2Str = plotModel.r2 ? plotModel.r2.toFixed(4) : "N/A";
     const decimNote = wasDecimated
       ? `  •  showing ${decimated.length.toLocaleString()} / ${data.length.toLocaleString()} pts`
       : "";
-    const chartTitle = `${modelToPlot.model} Regression  •  R² = ${r2Str}${decimNote}`;
+    const chartTitle =
+      plotModel.model === "DataOnly"
+        ? `Data (No fit)${decimNote}`
+        : `${plotModel.model} Regression  •  R² = ${r2Str}${decimNote}`;
 
     // ── Datasets ──────────────────────────────────────────────────────────
     const datasets = [
@@ -440,11 +497,14 @@ export default function DataAnalysisApp() {
         borderWidth: 1,
         order: 2,
       },
-      {
+    ];
+
+    if (plotModel.model !== "DataOnly") {
+      datasets.push({
         label:
           selectedModel === "AUTO"
-            ? `${modelToPlot.model} Fit (best)`
-            : `${modelToPlot.model} Fit (forced)`,
+            ? `${plotModel.model} Fit (best)`
+            : `${plotModel.model} Fit (forced)`,
         data: regressionLinePoints,
         type: "line",
         borderColor: C_LINE,
@@ -455,12 +515,16 @@ export default function DataAnalysisApp() {
         fill: false,
         tension: 0, // straight segments between computed steps = most accurate
         order: 1,
-      },
-    ];
+      });
+    }
 
     // Confidence interval
-    if (showConfidenceInterval && modelToPlot.r2 > 0.5) {
-      const stdError = Math.sqrt((1 - modelToPlot.r2) / data.length) * 2;
+    if (
+      showConfidenceInterval &&
+      plotModel.r2 > 0.5 &&
+      plotModel.model !== "DataOnly"
+    ) {
+      const stdError = Math.sqrt((1 - plotModel.r2) / data.length) * 2;
       const upperBound = regressionLinePoints.map((p) => ({
         x: p.x,
         y: p.y + stdError,
@@ -486,8 +550,8 @@ export default function DataAnalysisApp() {
     }
 
     // Residuals (also decimated to match scatter)
-    if (showResiduals) {
-      const allResiduals = calculateResiduals(data, modelToPlot);
+    if (showResiduals && plotModel.model !== "DataOnly") {
+      const allResiduals = calculateResiduals(data, plotModel);
       const residualPairs = allResiduals.map((r) => [r.x, r.residual]);
       const decimatedResiduals = decimatePoints(residualPairs, MAX_RENDER_PTS);
       datasets.push({
@@ -633,7 +697,7 @@ export default function DataAnalysisApp() {
             },
           },
           yResidual: {
-            display: showResiduals,
+            display: showResiduals && plotModel.model !== "DataOnly",
             position: "right",
             title: {
               display: showResiduals && !isMobile,
@@ -659,13 +723,41 @@ export default function DataAnalysisApp() {
   }
 
   async function handleAnalyze(e) {
-    e.preventDefault();
+    e?.preventDefault();
     setError(null);
     setIsAnalyzing(true);
     setRegressionResults(null);
 
     try {
-      const result = parseTextInputWithValidation(text);
+      if (inputMode === "equation") {
+        // generate points from equation and plot them (no backend fit)
+        const points = generateEquationPoints(equation);
+
+        if (!points || points.length < 2) {
+          setError("Equation produced insufficient points to plot.");
+          setIsAnalyzing(false);
+          return;
+        }
+
+        // store as analyzed data for preview/export convenience
+        setAnalyzedData({
+          data: points,
+          stats: { total: points.length, valid: points.length, rejected: 0 },
+          badLines: [],
+          source: "equation",
+        });
+        setPreviewRows(points.slice(0, 10));
+
+        // Create a chart showing only the data (no fitted model)
+        setTimeout(() => {
+          createChart(points, null); // createChart handles null as data-only
+        }, 100);
+
+        setIsAnalyzing(false);
+        return;
+      }
+
+      const result = parseTextInputWithValidation(text, inputMode);
 
       if (result.parseErrors && result.parseErrors.length > 0) {
         setError("Input format error. Please check the data format.");
@@ -695,8 +787,19 @@ export default function DataAnalysisApp() {
       const backendResults = await sendToBackend(result.validPairs);
       setRegressionResults(backendResults);
 
+      let chartData = result.validPairs;
+
+      if (inputMode === "x-only") {
+        const model = getActiveModel(backendResults);
+
+        chartData = result.validPairs.map(([x]) => {
+          const y = predictY(model, x);
+          return [x, y];
+        });
+      }
+
       setTimeout(() => {
-        createChart(result.validPairs, getActiveModel(backendResults));
+        createChart(chartData, getActiveModel(backendResults));
       }, 100);
 
       setIsAnalyzing(false);
@@ -814,6 +917,7 @@ export default function DataAnalysisApp() {
 
   function handleClear() {
     setText("");
+    setEquation("");
     setError(null);
     setPreviewRows([]);
     setFilename("");
@@ -833,6 +937,13 @@ export default function DataAnalysisApp() {
   }
 
   const activeModel = getActiveModel(regressionResults);
+
+  const textareaPlaceholder =
+    inputMode === "pairs"
+      ? "0,0\n1,2\n2,4\n3,6\n4,8"
+      : inputMode === "x-only"
+        ? "0\n1\n2\n3\n4"
+        : "";
 
   return (
     <div className="min-h-screen p-6">
@@ -861,19 +972,45 @@ export default function DataAnalysisApp() {
           <div className="relative group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-2xl opacity-20 group-hover:opacity-30 blur transition duration-300"></div>
             <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
-              <label className="flex items-center gap-2 text-lg font-semibold mb-4 text-cyan-400">
-                <Zap className="w-5 h-5" />
-                Manual Input
-              </label>
+              <div className="flex items-start justify-between mb-4">
+                <label className="flex items-center gap-2 text-lg font-semibold text-cyan-400">
+                  <Zap className="w-5 h-5" />
+                  Manual Input
+                </label>
 
-              <textarea
-                aria-label="data-input"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="0,0&#10;1,2&#10;2,4&#10;3,6&#10;4,8"
-                rows={12}
-                className="w-full bg-slate-950/50 text-slate-200 border border-slate-700 rounded-xl p-4 resize-y focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm transition-all"
-              />
+                {/* Input mode dropdown placed next to the label */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-400">Mode</label>
+                  <select
+                    value={inputMode}
+                    onChange={(e) => setInputMode(e.target.value)}
+                    className="bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  >
+                    <option value="pairs">Pairs</option>
+                    <option value="x-only">X-only</option>
+                    <option value="equation">Equation</option>
+                  </select>
+                </div>
+              </div>
+
+              {inputMode === "equation" ? (
+                <input
+                  aria-label="equation-input"
+                  value={equation}
+                  onChange={(e) => setEquation(e.target.value)}
+                  placeholder="Enter equation in x, e.g. 2*x + 3 or sin(x)"
+                  className="w-full bg-slate-950/50 text-slate-200 border border-slate-700 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm transition-all"
+                />
+              ) : (
+                <textarea
+                  aria-label="data-input"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder={textareaPlaceholder}
+                  rows={12}
+                  className="w-full bg-slate-950/50 text-slate-200 border border-slate-700 rounded-xl p-4 resize-y focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm transition-all"
+                />
+              )}
 
               <div className="grid grid-cols-2 gap-2 mt-4">
                 <button
@@ -1411,7 +1548,7 @@ export default function DataAnalysisApp() {
         )}
 
         {/* Chart */}
-        {regressionResults && (
+        {(regressionResults || inputMode === "equation") && (
           <div className="relative group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-2xl opacity-20 blur transition duration-300"></div>
             <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
