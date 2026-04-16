@@ -1,35 +1,18 @@
 import React from "react";
 import { Award, Download, Activity } from "lucide-react";
+import { useRegressionData } from "../../hooks/useRegressionData";
 
-export default function ModelCards({
-  regressionResults,
-  selectedModel,
-  setSelectedModel,
-  activeModel,
-  onExportChart,
-  onExportData,
-}) {
+export default function ModelCards() {
+  const {
+    regressionResults,
+    selectedModel,
+    activeModel,
+    exportChart,
+    exportData,
+  } = useRegressionData();
+
   if (!regressionResults || !Array.isArray(regressionResults.allModels)) {
     return null;
-  }
-
-  const models = regressionResults.allModels;
-
-  function fmtR2(r2) {
-    if (r2 === null || r2 === undefined || Number.isNaN(r2)) return "N/A";
-    return Number(r2).toFixed(6);
-  }
-
-  function fmtAIC(aic) {
-    if (
-      aic === null ||
-      aic === undefined ||
-      aic === Infinity ||
-      aic === -Infinity ||
-      Number.isNaN(aic)
-    )
-      return "N/A";
-    return Number(aic).toFixed(4);
   }
 
   return (

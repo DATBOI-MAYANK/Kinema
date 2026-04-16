@@ -1,6 +1,9 @@
-import { Upload } from "lucide-react";
+import { Upload, Database, AlertCircle, CheckCircle } from "lucide-react";
+import { useRegressionData } from "../../hooks/useRegressionData";
 
 export function FileUpload() {
+  const { filename, previewRows, handleFileChange } = useRegressionData();
+
   return (
     <div className="relative group">
       <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl opacity-20 group-hover:opacity-30 blur transition duration-300"></div>

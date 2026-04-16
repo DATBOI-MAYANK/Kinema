@@ -25,7 +25,7 @@ export function useChart() {
       if (chartRef.current) {
         try {
           chartRef.current.destroy();
-        } catch (err) {
+        } catch {
           // ignore destroy errors during unmount cleanup
         }
         chartRef.current = null;
@@ -51,10 +51,9 @@ export function useChart() {
     if (chartRef.current) {
       try {
         chartRef.current.destroy();
-      } catch (err) {
+      } catch {
         // Ignore errors from Chart.js destroy
-        // eslint-disable-next-line no-console
-        console.warn("useChart: error destroying existing chart", err);
+        console.warn("useChart: error destroying existing chart");
       }
       chartRef.current = null;
     }
@@ -64,9 +63,8 @@ export function useChart() {
       const chart = new Chart(ctx, config);
       chartRef.current = chart;
       return chart;
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("useChart: failed to create chart", err);
+    } catch {
+      console.error("useChart: failed to create chart");
       return null;
     }
   }
@@ -97,9 +95,8 @@ export function useChart() {
     // Request Chart.js to update the rendering
     try {
       chart.update(animate ? undefined : 0);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn("useChart: chart.update() failed", err);
+    } catch {
+      console.warn("useChart: chart.update() failed");
     }
   }
 
@@ -110,9 +107,8 @@ export function useChart() {
     if (chartRef.current) {
       try {
         chartRef.current.destroy();
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("useChart: error destroying chart", err);
+      } catch {
+        console.warn("useChart: error destroying chart");
       }
       chartRef.current = null;
     }

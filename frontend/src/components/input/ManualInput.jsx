@@ -1,18 +1,21 @@
 import React from "react";
 import { Zap, Trash2, TrendingUp } from "lucide-react";
+import { useRegressionData } from "../../hooks/useRegressionData";
 
-export default function ManualInput({
-  text,
-  setText,
-  equation,
-  setEquation,
-  inputMode,
-  setInputMode,
-  isAnalyzing,
-  onAnalyze,
-  onLoadSample,
-  onClear,
-}) {
+export default function ManualInput() {
+  const {
+    text,
+    setText,
+    equation,
+    setEquation,
+    inputMode,
+    setInputMode,
+    isAnalyzing,
+    handleAnalyze,
+    loadSample,
+    clearAll,
+  } = useRegressionData();
+
   const textareaPlaceholder =
     inputMode === "pairs"
       ? "0,0\n1,2\n2,4\n3,6\n4,8"
@@ -76,7 +79,7 @@ export default function ManualInput({
         <div className="grid grid-cols-2 gap-2 mt-4">
           <button
             type="button"
-            onClick={onAnalyze}
+            onClick={handleAnalyze}
             disabled={isAnalyzing}
             className="col-span-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-cyan-600 hover:to-blue-700 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
@@ -97,7 +100,7 @@ export default function ManualInput({
             <button
               key={s.key}
               type="button"
-              onClick={() => onLoadSample(s.key)}
+              onClick={() => loadSample(s.key)}
               className="bg-slate-800 text-slate-300 px-2 py-2 rounded-lg text-xs hover:bg-slate-700 transition-all border border-slate-700"
             >
               {s.label}
@@ -106,7 +109,7 @@ export default function ManualInput({
 
           <button
             type="button"
-            onClick={onClear}
+            onClick={clearAll}
             className="col-span-2 bg-red-500/10 text-red-400 px-3 py-2 rounded-lg text-sm hover:bg-red-500/20 transition-all border border-red-500/30 flex items-center justify-center gap-2"
           >
             <Trash2 className="w-4 h-4" />

@@ -2,7 +2,7 @@ import Papa from "papaparse";
 
 export function parseTextInputWithValidation(textInput, mode = "pairs") {
   const result = Papa.parse(textInput, {
-    header: true,
+    header: false,
     skipEmptyLines: true,
     dynamicTyping: true,
   });

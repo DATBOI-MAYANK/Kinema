@@ -1,6 +1,6 @@
 import React from "react";
 import { Settings, ChevronDown } from "lucide-react";
-import PropTypes from "prop-types";
+import { useRegressionData } from "../../hooks/useRegressionData";
 
 /**
  * AdvancedSettings
@@ -19,36 +19,33 @@ import PropTypes from "prop-types";
  * - setPolynomialDegree (fn)
  * - updateChart (fn) optional: a function to request a chart redraw after changes
  */
-export default function AdvancedSettings({
-  showAdvanced,
-  setShowAdvanced,
-  regressionResults,
-  selectedModel,
-  setSelectedModel,
-  showConfidenceInterval,
-  setShowConfidenceInterval,
-  showResiduals,
-  setShowResiduals,
-  polynomialDegree,
-  setPolynomialDegree,
-  updateChart = () => {},
-}) {
+export default function AdvancedSettings() {
+  const {
+    showAdvanced,
+    setShowAdvanced,
+    regressionResults,
+    selectedModel,
+    setSelectedModel,
+    showConfidenceInterval,
+    setShowConfidenceInterval,
+    showResiduals,
+    setShowResiduals,
+    polynomialDegree,
+    setPolynomialDegree,
+  } = useRegressionData();
+
   if (!regressionResults) return null;
 
   const handleModelChange = (e) => {
     setSelectedModel(e.target.value);
-    // small delay to allow state propagation in parent before redraw
-    setTimeout(updateChart, 50);
   };
 
   const handleConfidenceChange = (e) => {
     setShowConfidenceInterval(e.target.checked);
-    setTimeout(updateChart, 50);
   };
 
   const handleResidualsChange = (e) => {
     setShowResiduals(e.target.checked);
-    setTimeout(updateChart, 50);
   };
 
   const handleDegreeChange = (e) => {
@@ -177,18 +174,3 @@ export default function AdvancedSettings({
     </div>
   );
 }
-
-AdvancedSettings.propTypes = {
-  showAdvanced: PropTypes.bool.isRequired,
-  setShowAdvanced: PropTypes.func.isRequired,
-  regressionResults: PropTypes.object,
-  selectedModel: PropTypes.string.isRequired,
-  setSelectedModel: PropTypes.func.isRequired,
-  showConfidenceInterval: PropTypes.bool.isRequired,
-  setShowConfidenceInterval: PropTypes.func.isRequired,
-  showResiduals: PropTypes.bool.isRequired,
-  setShowResiduals: PropTypes.func.isRequired,
-  polynomialDegree: PropTypes.number.isRequired,
-  setPolynomialDegree: PropTypes.func.isRequired,
-  updateChart: PropTypes.func,
-};
