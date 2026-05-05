@@ -9,27 +9,41 @@ import { CreateChart } from "./chart/Chart";
 import { useRegressionData } from "../hooks/useRegressionData";
 
 export default function DataAnalysisApp() {
-	const { regressionResults, inputMode } = useRegressionData();
+  const { regressionResults, inputMode } = useRegressionData();
 
-	return (
-		<div className="min-h-screen p-6">
-			<div className="max-w-7xl mx-auto">
-				<Header />
+  // If user is in equation-only mode, show only the manual input and chart for a focused layout
+  if (inputMode === "equation") {
+    return (
+      <div className="min-h-screen p-6">
+        <div className="max-w-7xl mx-auto">
+          <Header />
+          <div className="mb-6">
+            <ManualInput />
+          </div>
+          <CreateChart />
+        </div>
+      </div>
+    );
+  }
 
-				<div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-					<ManualInput />
-					<FileUpload />
-				</div>
+  return (
+    <div className="min-h-screen p-6">
+      <div className="max-w-7xl mx-auto">
+        <Header />
 
-				{regressionResults && <AdvancedSettings />}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <ManualInput />
+          <FileUpload />
+        </div>
 
-				<StatusBanner />
+        {regressionResults && <AdvancedSettings />}
 
-				{regressionResults && <ModelCards />}
+        <StatusBanner />
 
-				{(regressionResults || inputMode === "equation") && <CreateChart />}
-			</div>
-		</div>
-	);
+        {regressionResults && <ModelCards />}
+
+        {(regressionResults || inputMode === "equation") && <CreateChart />}
+      </div>
+    </div>
+  );
 }
-

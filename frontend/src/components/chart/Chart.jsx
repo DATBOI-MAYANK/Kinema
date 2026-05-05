@@ -24,11 +24,17 @@ function decimatePoints(points, threshold) {
 
   for (let i = 0; i < threshold - 2; i++) {
     const bucketStart = Math.floor((i + 1) * bucketSize) + 1;
-    const bucketEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, points.length - 1);
+    const bucketEnd = Math.min(
+      Math.floor((i + 2) * bucketSize) + 1,
+      points.length - 1,
+    );
 
     let avgX = 0;
     let avgY = 0;
-    const nextBucketEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, points.length - 1);
+    const nextBucketEnd = Math.min(
+      Math.floor((i + 2) * bucketSize) + 1,
+      points.length - 1,
+    );
     const nextBucketStart = Math.floor((i + 2) * bucketSize) + 1;
     let count = 0;
 
@@ -50,7 +56,9 @@ function decimatePoints(points, threshold) {
 
     for (let j = bucketStart; j < bucketEnd; j++) {
       const area =
-        Math.abs((ax - avgX) * (points[j][1] - ay) - (ax - points[j][0]) * (avgY - ay)) * 0.5;
+        Math.abs(
+          (ax - avgX) * (points[j][1] - ay) - (ax - points[j][0]) * (avgY - ay),
+        ) * 0.5;
       if (area > maxArea) {
         maxArea = area;
         maxIdx = j;
@@ -65,7 +73,18 @@ function decimatePoints(points, threshold) {
   return sampled;
 }
 
-function buildChartConfig({ data, model, selectedModel, showConfidenceInterval, showResiduals }) {
+import { generateEquationPoints } from "../../services/equation";
+
+function buildChartConfig({
+  data,
+  model,
+  selectedModel,
+  showConfidenceInterval,
+  showResiduals,
+  inputMode,
+  equation,
+  analyzedData,
+}) {
   const plotModel = model || { model: "DataOnly", r2: 0, coefficients: [] };
   const isMobile = window.innerWidth < 640;
   const titleSize = isMobile ? 13 : 15;
@@ -138,9 +157,13 @@ function buildChartConfig({ data, model, selectedModel, showConfidenceInterval, 
     },
   ];
 
+  // If we have a fitted model, show its regression line
   if (plotModel.model !== "DataOnly") {
     datasets.push({
-      label: selectedModel === "AUTO" ? `${plotModel.model} Fit (best)` : `${plotModel.model} Fit (forced)`,
+      label:
+        selectedModel === "AUTO"
+          ? `${plotModel.model} Fit (best)`
+          : `${plotModel.model} Fit (forced)`,
       data: regressionLinePoints,
       type: "line",
       borderColor: C_LINE,
@@ -152,12 +175,75 @@ function buildChartConfig({ data, model, selectedModel, showConfidenceInterval, 
       tension: 0,
       order: 1,
     });
+  } else {
+    // No fitted model available — draw a smooth interpolation line through data (Desmos-like)
+    try {
+      const linePoints = [...rawPairs]
+        .sort((a, b) => a[0] - b[0])
+        .map(([x, y]) => ({ x, y }));
+      if (linePoints.length > 1) {
+        datasets.push({
+          label: "Interpolation",
+          data: linePoints,
+          type: "line",
+          borderColor: "rgba(99,102,241,0.9)",
+          backgroundColor: "rgba(99,102,241,0.08)",
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false,
+          tension: 0.35,
+          order: 1,
+        });
+      }
+    } catch {
+      // ignore
+    }
   }
 
-  if (showConfidenceInterval && plotModel.r2 > 0.5 && plotModel.model !== "DataOnly") {
+  // If the dataset was created from an explicit equation, draw that equation curve on top
+  if (
+    (inputMode === "equation" || analyzedData?.source === "equation") &&
+    equation
+  ) {
+    try {
+      // generate denser points across the visible range
+      const eqPts = generateEquationPoints(equation).map(([x, y]) => ({
+        x,
+        y,
+      }));
+      if (eqPts.length > 0) {
+        datasets.unshift({
+          label: "Equation",
+          data: eqPts,
+          type: "line",
+          borderColor: "rgba(16,185,129,0.95)",
+          backgroundColor: "rgba(16,185,129,0.08)",
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false,
+          tension: 0,
+          order: 0,
+        });
+      }
+    } catch {
+      // ignore equation generation errors
+    }
+  }
+
+  if (
+    showConfidenceInterval &&
+    plotModel.r2 > 0.5 &&
+    plotModel.model !== "DataOnly"
+  ) {
     const stdError = Math.sqrt((1 - plotModel.r2) / data.length) * 2;
-    const upperBound = regressionLinePoints.map((point) => ({ x: point.x, y: point.y + stdError }));
-    const lowerBound = regressionLinePoints.map((point) => ({ x: point.x, y: point.y - stdError }));
+    const upperBound = regressionLinePoints.map((point) => ({
+      x: point.x,
+      y: point.y + stdError,
+    }));
+    const lowerBound = regressionLinePoints.map((point) => ({
+      x: point.x,
+      y: point.y - stdError,
+    }));
 
     datasets.push({
       label: "95% Confidence Band",
@@ -175,7 +261,10 @@ function buildChartConfig({ data, model, selectedModel, showConfidenceInterval, 
   }
 
   if (showResiduals && plotModel.model !== "DataOnly") {
-    const residualPairs = calculateResiduals(data, plotModel).map((item) => [item.x, item.residual]);
+    const residualPairs = calculateResiduals(data, plotModel).map((item) => [
+      item.x,
+      item.residual,
+    ]);
     const decimatedResiduals = decimatePoints(residualPairs, MAX_RENDER_PTS);
 
     datasets.push({
@@ -352,6 +441,9 @@ export function CreateChart() {
     showConfidenceInterval,
     showResiduals,
     inputMode,
+    equation,
+    exportChart: doExportChart,
+    exportData: doExportData,
   } = useRegressionData();
   const { canvasRef, createChart, destroyChart } = useChart();
 
@@ -377,6 +469,9 @@ export function CreateChart() {
       selectedModel,
       showConfidenceInterval,
       showResiduals,
+      inputMode,
+      equation,
+      analyzedData,
     });
 
     createChart(config);
@@ -384,18 +479,63 @@ export function CreateChart() {
     return () => {
       destroyChart();
     };
-  }, [activeModel, createChart, destroyChart, plotData, regressionResults, selectedModel, showConfidenceInterval, showResiduals]);
+  }, [
+    activeModel,
+    createChart,
+    destroyChart,
+    plotData,
+    regressionResults,
+    selectedModel,
+    showConfidenceInterval,
+    showResiduals,
+    inputMode,
+    equation,
+    analyzedData,
+  ]);
 
   return (
     <div className="relative group">
       <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-2xl opacity-20 blur transition duration-300" />
       <div className="relative bg-slate-900/90 backdrop-blur-xl p-6 rounded-2xl border border-slate-700/50">
-        <h3 className="flex items-center gap-2 text-xl font-semibold mb-4 text-cyan-400">
-          <TrendingUp className="w-5 h-5" />
-          Visualization
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="flex items-center gap-2 text-xl font-semibold text-cyan-400">
+            <TrendingUp className="w-5 h-5" />
+            Visualization
+          </h3>
+
+          <div className="flex items-center gap-2">
+            {/* Export buttons: image always available when analyzedData exists */}
+            {analyzedData && (
+              <>
+                <button
+                  onClick={() => doExportChart()}
+                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg text-sm transition-all border border-slate-600"
+                >
+                  Export JPG
+                </button>
+                <button
+                  onClick={() => doExportData("csv")}
+                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg text-sm transition-all border border-slate-600"
+                >
+                  CSV
+                </button>
+                <button
+                  onClick={() => doExportData("json")}
+                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg text-sm transition-all border border-slate-600"
+                >
+                  JSON
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="bg-slate-950/50 p-2 sm:p-4 rounded-xl relative h-[320px] sm:h-[420px] lg:h-[520px]">
-          <canvas ref={canvasRef} id="regressionChart" className="absolute inset-0 w-full h-full" />
+          <canvas
+            ref={canvasRef}
+            id="regressionChart"
+            className="absolute inset-0 w-full h-full"
+          />
         </div>
       </div>
     </div>

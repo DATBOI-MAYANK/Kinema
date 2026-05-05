@@ -14,6 +14,8 @@ export default function ManualInput() {
     handleAnalyze,
     loadSample,
     clearAll,
+    selectedModel,
+    setSelectedModel,
   } = useRegressionData();
 
   const textareaPlaceholder =
@@ -55,6 +57,46 @@ export default function ManualInput() {
               <option value="equation">Equation</option>
             </select>
           </div>
+
+          {/* Model selector + apply button (helpful for X-only mode) */}
+          {inputMode == "x-only" ? (
+            <div className="flex items-center gap-2 ">
+              <label className="text-xs text-slate-400">Model</label>
+              <select
+                value={selectedModel || "AUTO"}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              >
+                <option value="AUTO">AUTO</option>
+                <option value="Linear">Linear</option>
+                <option value="Quadratic">Quadratic</option>
+                <option value="Cubic">Cubic</option>
+                <option value="Exponential">Exponential</option>
+                <option value="Logarithmic">Logarithmic</option>
+                <option value="Power">Power</option>
+                <option value="Sine">Sine</option>
+              </select>
+              {inputMode === "x-only" && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    loadSample(
+                      // derive sample key from selectedModel (simple map)
+                      selectedModel && selectedModel !== "AUTO"
+                        ? selectedModel.toLowerCase()
+                        : "linear",
+                      "applyModel",
+                    )
+                  }
+                  className="ml-2 bg-emerald-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-emerald-700 transition-all"
+                >
+                  Use Model
+                </button>
+              )}
+            </div>
+          ) : (
+            ""
+          )}
         </div>
 
         {inputMode === "equation" ? (

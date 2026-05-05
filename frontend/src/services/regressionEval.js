@@ -31,6 +31,15 @@ export function evaluatePower(coefficients, x) {
   return a * Math.pow(x, b);
 }
 
+export function evaluateSine(coefficients, x) {
+  // Sine: y = A * sin(B * x + C) + D
+  // coefficients: [A, B, C, D]
+  if (!coefficients || coefficients.length < 4) return null;
+  const [A, B, C, D] = coefficients;
+  if ([A, B, C, D].some((v) => isNaN(v))) return null;
+  return A * Math.sin(B * x + C) + D;
+}
+
 export function predictY(model, x) {
   if (!model) return 0;
   if (model.model === "Linear") {

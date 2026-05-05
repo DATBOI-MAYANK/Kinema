@@ -17,6 +17,69 @@ const SAMPLE_DATA = {
   sine: "0,0\n0.785,0.707\n1.571,1\n2.356,0.707\n3.142,0\n3.927,-0.707\n4.712,-1\n5.498,-0.707\n6.283,0",
 };
 
+const MODEL_MAP = {
+  linear: "Linear",
+  quadratic: "Quadratic",
+  cubic: "Cubic",
+  exponential: "Exponential",
+  logarithmic: "Logarithmic",
+  power: "Power",
+  sine: "Sine",
+};
+
+// Precomputed model objects to avoid backend calls for common samples.
+const PRECOMPUTED_MODELS = {
+  linear: {
+    model: "Linear",
+    coefficients: [2, 0], // y = 2x + 0
+    equation: "2*x + 0",
+    r2: 1,
+    aic: null,
+  },
+  quadratic: {
+    model: "Quadratic",
+    coefficients: [4.9, 0, 0], // y = 4.9*x^2
+    equation: "4.9*x^2",
+    r2: 1,
+    aic: null,
+  },
+  cubic: {
+    model: "Cubic",
+    coefficients: [1, 0, 0, 0], // y = x^3
+    equation: "x^3",
+    r2: 1,
+    aic: null,
+  },
+  exponential: {
+    model: "Exponential",
+    coefficients: [1, Math.log(2)], // y = 1 * e^(ln2 * x) == 2^x
+    equation: "1 * exp(0.693147*x)",
+    r2: 1,
+    aic: null,
+  },
+  logarithmic: {
+    model: "Logarithmic",
+    coefficients: [0, 1], // y = ln(x)
+    equation: "ln(x)",
+    r2: 1,
+    aic: null,
+  },
+  power: {
+    model: "Power",
+    coefficients: [1, 2], // y = 1 * x^2
+    equation: "x^2",
+    r2: 1,
+    aic: null,
+  },
+  sine: {
+    model: "Sine",
+    coefficients: [1, 1, 0, 0], // y = 1 * sin(1*x + 0) + 0
+    equation: "sin(x)",
+    r2: 1,
+    aic: null,
+  },
+};
+
 function buildExportCsv(data, activeModel) {
   let csv = "X,Y,Predicted,Residual\n";
 
@@ -72,26 +135,123 @@ export function useRegressionData() {
   } = useKinemaContext();
 
   const setText = useCallback((value) => setField("text", value), [setField]);
-  const setEquation = useCallback((value) => setField("equation", value), [setField]);
-  const setInputMode = useCallback((value) => setField("inputMode", value), [setField]);
-  const setFilename = useCallback((value) => setField("filename", value), [setField]);
-  const setPreviewRows = useCallback((value) => setField("previewRows", value), [setField]);
+  const setEquation = useCallback(
+    (value) => setField("equation", value),
+    [setField],
+  );
+  const setInputMode = useCallback(
+    (value) => setField("inputMode", value),
+    [setField],
+  );
+  const setFilename = useCallback(
+    (value) => setField("filename", value),
+    [setField],
+  );
+  const setPreviewRows = useCallback(
+    (value) => setField("previewRows", value),
+    [setField],
+  );
   const setError = useCallback((value) => setField("error", value), [setField]);
-  const setAnalyzedData = useCallback((value) => setField("analyzedData", value), [setField]);
-  const setRegressionResults = useCallback((value) => setField("regressionResults", value), [setField]);
-  const setIsAnalyzing = useCallback((value) => setField("isAnalyzing", value), [setField]);
-  const setShowAdvanced = useCallback((value) => setField("showAdvanced", value), [setField]);
-  const setPolynomialDegree = useCallback((value) => setField("polynomialDegree", value), [setField]);
-  const setShowConfidenceInterval = useCallback((value) => setField("showConfidenceInterval", value), [setField]);
-  const setShowResiduals = useCallback((value) => setField("showResiduals", value), [setField]);
-  const setSelectedModel = useCallback((value) => setField("selectedModel", value), [setField]);
+  const setAnalyzedData = useCallback(
+    (value) => setField("analyzedData", value),
+    [setField],
+  );
+  const setRegressionResults = useCallback(
+    (value) => setField("regressionResults", value),
+    [setField],
+  );
+  const setIsAnalyzing = useCallback(
+    (value) => setField("isAnalyzing", value),
+    [setField],
+  );
+  const setShowAdvanced = useCallback(
+    (value) => setField("showAdvanced", value),
+    [setField],
+  );
+  const setPolynomialDegree = useCallback(
+    (value) => setField("polynomialDegree", value),
+    [setField],
+  );
+  const setShowConfidenceInterval = useCallback(
+    (value) => setField("showConfidenceInterval", value),
+    [setField],
+  );
+  const setShowResiduals = useCallback(
+    (value) => setField("showResiduals", value),
+    [setField],
+  );
+  const setSelectedModel = useCallback(
+    (value) => setField("selectedModel", value),
+    [setField],
+  );
 
   const clearAll = useCallback(() => {
     resetAll();
   }, [resetAll]);
 
   const loadSample = useCallback(
-    (type = "linear") => {
+    async (type = "linear", action = "replace") => {
+      // If user requested to apply the sample as a model (and has X-only inputs),
+      // use precomputed coefficients when available to avoid backend calls.
+      if (
+        action === "applyModel" &&
+        text &&
+        text.trim() !== "" &&
+        inputMode === "x-only"
+      ) {
+        setError(null);
+        setIsAnalyzing(true);
+        try {
+          const pre = PRECOMPUTED_MODELS[type];
+          if (!pre) {
+            throw new Error("No precomputed model available for this sample.");
+          }
+
+          const userXParsed = parseTextInputWithValidation(text, "x-only");
+          if (!userXParsed.validPairs || userXParsed.validPairs.length === 0) {
+            throw new Error("No valid X values found in the input to predict.");
+          }
+
+          const bestModel = {
+            model: pre.model,
+            coefficients: pre.coefficients,
+            equation: pre.equation,
+            r2: pre.r2,
+            aic: pre.aic,
+          };
+
+          const allModels = [bestModel];
+
+          const predictedPairs = userXParsed.validPairs.map(([x]) => [
+            x,
+            predictValue(bestModel, x),
+          ]);
+
+          const analyzedPayload = {
+            data: predictedPairs,
+            stats: {
+              total: userXParsed.totalRows,
+              valid: userXParsed.validRows,
+              rejected: userXParsed.rejectedRows,
+            },
+            badLines: userXParsed.badLines,
+            source: "manual",
+          };
+
+          setRegressionResults({ bestModel, allModels });
+          setSelectedModel(pre.model);
+          setAnalyzedData(analyzedPayload);
+          setPreviewRows(predictedPairs.slice(0, 10));
+        } catch (err) {
+          setError(err.message || "Failed to apply sample model");
+        } finally {
+          setIsAnalyzing(false);
+        }
+
+        return;
+      }
+
+      // Default behavior: replace textarea with the sample data
       setMany({
         text: SAMPLE_DATA[type] || SAMPLE_DATA.linear,
         error: null,
@@ -102,7 +262,18 @@ export function useRegressionData() {
         filename: "",
       });
     },
-    [setMany],
+    [
+      setMany,
+      text,
+      inputMode,
+      polynomialDegree,
+      setIsAnalyzing,
+      setError,
+      setAnalyzedData,
+      setRegressionResults,
+      setSelectedModel,
+      setPreviewRows,
+    ],
   );
 
   const handleAnalyze = useCallback(
@@ -137,7 +308,9 @@ export function useRegressionData() {
         }
 
         if (!result.validPairs || result.validPairs.length < 2) {
-          throw new Error("At least two valid data points are required for analysis.");
+          throw new Error(
+            "At least two valid data points are required for analysis.",
+          );
         }
 
         setAnalyzedData({
@@ -152,6 +325,40 @@ export function useRegressionData() {
         });
 
         setPreviewRows(result.validPairs.slice(0, 10));
+
+        // If user provided X-only values we cannot meaningfully send them to the backend
+        // (which expects X,Y pairs). Instead, require an existing model (from prior
+        // analysis) or instruct the user to switch to equation/full-pair input.
+        if (inputMode === "x-only") {
+          if (!activeModel) {
+            throw new Error(
+              "X-only input requires an existing model to predict Y. Please first analyze full (X,Y) data to obtain a model, or switch to 'equation' mode.",
+            );
+          }
+
+          const predictedPairs = result.validPairs.map(([x]) => [
+            x,
+            predictValue(activeModel, x),
+          ]);
+
+          const analyzedPayload = {
+            data: predictedPairs,
+            stats: {
+              total: result.totalRows,
+              valid: result.validRows,
+              rejected: result.rejectedRows,
+            },
+            badLines: result.badLines,
+            source: "manual",
+          };
+
+          setAnalyzedData(analyzedPayload);
+          setPreviewRows(predictedPairs.slice(0, 10));
+
+          // No backend call in x-only mode
+          setIsAnalyzing(false);
+          return;
+        }
 
         const backendResults = await sendToBackend(
           result.validPairs,
@@ -170,16 +377,6 @@ export function useRegressionData() {
           source: "manual",
         };
 
-        if (inputMode === "x-only") {
-          const model = backendResults.bestModel;
-          const predictedPairs = result.validPairs.map(([x]) => [x, predictValue(model, x)]);
-          analyzedPayload = {
-            ...analyzedPayload,
-            data: predictedPairs,
-          };
-          setPreviewRows(predictedPairs.slice(0, 10));
-        }
-
         setAnalyzedData(analyzedPayload);
         setRegressionResults(backendResults);
       } catch (err) {
@@ -188,7 +385,19 @@ export function useRegressionData() {
         setIsAnalyzing(false);
       }
     },
-    [equation, inputMode, polynomialDegree, selectedModel, setAnalyzedData, setError, setIsAnalyzing, setPreviewRows, setRegressionResults, text],
+    [
+      equation,
+      inputMode,
+      polynomialDegree,
+      selectedModel,
+      setAnalyzedData,
+      setError,
+      setIsAnalyzing,
+      setPreviewRows,
+      setRegressionResults,
+      text,
+      activeModel,
+    ],
   );
 
   const handleFileChange = useCallback(
@@ -232,11 +441,15 @@ export function useRegressionData() {
             });
 
             if (results.errors && results.errors.length > 0) {
-              throw new Error("CSV format error. Please check the file structure.");
+              throw new Error(
+                "CSV format error. Please check the file structure.",
+              );
             }
 
             if (validPairs.length < 2) {
-              throw new Error("At least two valid data points are required for analysis.");
+              throw new Error(
+                "At least two valid data points are required for analysis.",
+              );
             }
 
             setAnalyzedData({
@@ -267,7 +480,16 @@ export function useRegressionData() {
         },
       });
     },
-    [polynomialDegree, selectedModel, setAnalyzedData, setError, setFilename, setIsAnalyzing, setPreviewRows, setRegressionResults],
+    [
+      polynomialDegree,
+      selectedModel,
+      setAnalyzedData,
+      setError,
+      setFilename,
+      setIsAnalyzing,
+      setPreviewRows,
+      setRegressionResults,
+    ],
   );
 
   const exportChart = useCallback(() => {
@@ -292,27 +514,45 @@ export function useRegressionData() {
 
   const exportData = useCallback(
     (format = "csv") => {
-      if (!analyzedData || !regressionResults || !activeModel) return;
+      if (!analyzedData) return;
 
       const data = analyzedData.data;
 
       if (format === "csv") {
-        const csv = buildExportCsv(data, activeModel);
+        // If we have an activeModel use it to compute predicted/residual columns
+        if (activeModel) {
+          const csv = buildExportCsv(data, activeModel);
+          const blob = new Blob([csv], { type: "text/csv" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.download = "regression-data.csv";
+          link.href = url;
+          link.click();
+          URL.revokeObjectURL(url);
+          return;
+        }
+
+        // Fallback: export X,Y only
+        let csv = "X,Y\n";
+        data.forEach(([x, y]) => {
+          csv += `${x},${y}\n`;
+        });
         const blob = new Blob([csv], { type: "text/csv" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.download = "regression-data.csv";
+        link.download = "data.csv";
         link.href = url;
         link.click();
         URL.revokeObjectURL(url);
         return;
       }
 
+      // JSON export: include what we have
       const exportObj = {
         originalData: data,
-        bestModel: activeModel,
-        allModels: regressionResults.allModels,
-        statistics: analyzedData.stats,
+        bestModel: activeModel || null,
+        allModels: regressionResults?.allModels || null,
+        statistics: analyzedData.stats || null,
       };
 
       const blob = new Blob([JSON.stringify(exportObj, null, 2)], {

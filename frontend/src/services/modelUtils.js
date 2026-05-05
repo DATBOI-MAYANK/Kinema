@@ -3,6 +3,7 @@ import {
   evaluateLogarithmic,
   evaluatePolynomial,
   evaluatePower,
+  evaluateSine,
 } from "./regressionEval";
 
 export function getActiveModel(regressionResults, selectedModel) {
@@ -36,6 +37,8 @@ export function predictValue(model, x) {
       return evaluateLogarithmic(model.coefficients, x);
     case "Power":
       return evaluatePower(model.coefficients, x);
+    case "Sine":
+      return evaluateSine(model.coefficients, x);
     default:
       return 0;
   }
