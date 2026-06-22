@@ -105,12 +105,38 @@ async function sendToBackend(dataPoints, polynomialDegree, selectedModel) {
     }),
   });
 
+  const contentType = response.headers.get("content-type") || "";
+
+  // Try to parse JSON when possible, but fall back to text so we can surface
+  // clearer errors instead of unhelpful JSON.parse failures.
+  const parseBody = async () => {
+    const text = await response.text();
+    if (!text) return null;
+    if (contentType.includes("application/json")) {
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        // Fall through to return raw text
+      }
+    }
+    // Attempt to JSON.parse even if the content-type wasn't set correctly
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      return text;
+    }
+  };
+
+  const body = await parseBody();
+
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || "Failed to analyze data");
+    if (body && typeof body === "object" && body.error) {
+      throw new Error(body.error);
+    }
+    throw new Error(typeof body === "string" ? body : "Failed to analyze data");
   }
 
-  return response.json();
+  return body;
 }
 
 export function useRegressionData() {
