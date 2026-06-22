@@ -5,7 +5,8 @@ import { generateEquationPoints } from "../services/equation";
 import { predictValue } from "../services/modelUtils";
 import { useKinemaContext } from "../context/KinemaContext";
 
-const API_URL = "http://localhost:3000/api/analyze";
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:3000/api/analyze";
 
 const SAMPLE_DATA = {
   linear: "0,0\n1,2\n2,4\n3,6\n4,8",
