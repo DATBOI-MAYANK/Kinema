@@ -5,8 +5,7 @@ import { generateEquationPoints } from "../services/equation";
 import { predictValue } from "../services/modelUtils";
 import { useKinemaContext } from "../context/KinemaContext";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:3000/api/analyze";
+const API_URL = import.meta.env.VITE_API_URL + "api/analyze";
 
 const SAMPLE_DATA = {
   linear: "0,0\n1,2\n2,4\n3,6\n4,8",
@@ -115,15 +114,15 @@ async function sendToBackend(dataPoints, polynomialDegree, selectedModel) {
     if (contentType.includes("application/json")) {
       try {
         return JSON.parse(text);
-      } catch (e) {
+      } catch (error) {
         // Fall through to return raw text
       }
     }
     // Attempt to JSON.parse even if the content-type wasn't set correctly
     try {
       return JSON.parse(text);
-    } catch (e) {
-      return text;
+    } catch (error) {
+      return error ? text : null;
     }
   };
 

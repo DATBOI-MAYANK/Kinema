@@ -4,11 +4,17 @@ import analysisRoutes from "./routes/analysis.routes.js";
 
 const app = express();
 
-const port = process.env.PORT || 3000;
+const allowedOrigin = process.env.CORS_ORIGIN;
 
-app.use(cors());
+app.use(
+  cors({
+    origin: allowedOrigin,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
+);
+
 app.use(express.json());
-
 app.use("/api/analyze", analysisRoutes);
 
 app.listen(port, () => {
