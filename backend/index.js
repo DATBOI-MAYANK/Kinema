@@ -5,6 +5,7 @@ import analysisRoutes from "./routes/analysis.routes.js";
 const app = express();
 
 const allowedOrigin = process.env.CORS_ORIGIN;
+const port = process.env.PORT || 5000;
 
 app.use(
   cors({
