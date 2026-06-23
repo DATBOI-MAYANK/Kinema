@@ -45,7 +45,7 @@ export default function ManualInput() {
             Manual Input
           </label>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col lg:flex-row items-center gap-2">
             <label className="text-xs text-slate-400">Mode</label>
             <select
               value={inputMode}
@@ -60,7 +60,7 @@ export default function ManualInput() {
 
           {/* Model selector + apply button (helpful for X-only mode) */}
           {inputMode == "x-only" ? (
-            <div className="flex items-center gap-2 ">
+            <div className="flex flex-col lg:flex-row items-center gap-2 ml-1">
               <label className="text-xs text-slate-400">Model</label>
               <select
                 value={selectedModel || "AUTO"}

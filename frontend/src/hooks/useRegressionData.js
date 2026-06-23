@@ -5,7 +5,7 @@ import { generateEquationPoints } from "../services/equation";
 import { predictValue } from "../services/modelUtils";
 import { useKinemaContext } from "../context/KinemaContext";
 
-const API_URL = "http://localhost:3000/api/analyze";
+const API_URL = import.meta.env.VITE_API_URL + "api/analyze";
 
 const SAMPLE_DATA = {
   linear: "0,0\n1,2\n2,4\n3,6\n4,8",
@@ -104,12 +104,38 @@ async function sendToBackend(dataPoints, polynomialDegree, selectedModel) {
     }),
   });
 
+  const contentType = response.headers.get("content-type") || "";
+
+  // Try to parse JSON when possible, but fall back to text so we can surface
+  // clearer errors instead of unhelpful JSON.parse failures.
+  const parseBody = async () => {
+    const text = await response.text();
+    if (!text) return null;
+    if (contentType.includes("application/json")) {
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        // Fall through to return raw text
+      }
+    }
+    // Attempt to JSON.parse even if the content-type wasn't set correctly
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      return error ? text : null;
+    }
+  };
+
+  const body = await parseBody();
+
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || "Failed to analyze data");
+    if (body && typeof body === "object" && body.error) {
+      throw new Error(body.error);
+    }
+    throw new Error(typeof body === "string" ? body : "Failed to analyze data");
   }
 
-  return response.json();
+  return body;
 }
 
 export function useRegressionData() {
